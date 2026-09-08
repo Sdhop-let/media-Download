@@ -1,22 +1,19 @@
-# Gradle files
+# ===== Android / Gradle =====
 .gradle/
 build/
-
-# Local configuration file (sdk path, etc)
-local.properties
-
-# Log/OS Files
-*.log
-
-# Android Studio generated files and folders
+.kotlin/
 captures/
 .externalNativeBuild/
 .cxx/
-*.aab
+local.properties
+
+# Build outputs
 *.apk
+*.aab
+*.ap_
 output-metadata.json
 
-# IntelliJ
+# IntelliJ / Android Studio
 *.iml
 .idea/
 misc.xml
@@ -32,3 +29,17 @@ google-services.json
 
 # Android Profiling
 *.hprof
+
+# ===== Python (PC 版 backend) =====
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+
+# ===== Project specific =====
+# 本机调试产生的临时截图 / 日志
+.tmp_*
+*.log
+# 用户下载数据不入库
+data/
