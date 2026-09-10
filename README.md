@@ -21,6 +21,8 @@ Kotlin 2.0 · Jetpack Compose · 内嵌 yt-dlp · 代理自动优选 · 系统�
 | 收件箱（批量队列） | 任务与历史 | 设置 |
 |:---:|:---:|:---:|
 | ![收件箱](docs/screenshots/inbox.png) | ![任务与历史](docs/screenshots/tasks.png) | ![设置](docs/screenshots/settings.png) |
+| **素材库 · 时间视图** | **两级筛选** | **一键回跳原帖** |
+| ![素材库](docs/ep_lib.png) | ![筛选](docs/ep_filtered.png) | ![回跳](docs/ep_jump.png) |
 
 > 界面采用 **iOS 26 Liquid Glass × 莫奈取色** 设计语言：玻璃卡片浮于极光渐变之上，悬浮胶囊底栏，支持 Android 12+ 壁纸动态取色与 8 种预设种子色。
 
@@ -40,12 +42,13 @@ Kotlin 2.0 · Jetpack Compose · 内嵌 yt-dlp · 代理自动优选 · 系统�
 
 - **🔗 系统分享直达**：在任意 App 点「分享」选本应用 → 自动捕获链接 → 自动下载，全程零点击（可关闭）
 - **📥 收件箱批量队列**：链接先捕获进收件箱（带作者 / 文案 / 预览图），可单条或自选批量下载；按 URL 去重，失败可重试
-- **📚 素材库**：按时间网格 / 按作者手风琴两种视图，平台 / 类型筛选，统计面板，全屏图片查看，应用内视频播放（Media3）
-- **🗑 回收站**：删除走软删，可恢复或彻底清除，不误伤
-- **⚡ 代理自动优选**：直连 / 手动 / 端口扫描 / Clash 配置导入（文件·粘贴·URL 订阅），测速评分自动选路，周期复测自动切换
+- **📚 素材库**：两级筛选（来源 / 分组 / 类型）+ 时间网格 / 作者手风琴视图，时间线按下载时间倒序；统计面板，全屏图片查看，应用内视频播放（Media3）；下载完成自动刷新，顶部胶囊一键跳转查看新素材
+- **🗑 回收站**：删除走软删，可恢复或彻底清除；删除时文件先删成功才清数据库记录，失败可重试，另有残留清理兜底
+- **⚡ 代理自动优选**：直连 / 手动 / 端口扫描 / Clash 配置导入（文件·粘贴·URL 订阅），测速评分自动选路，周期复测自动切换；主测速源异常自动换备用源重测
+- **🛡 Root 代理探测**（可选）：root 设备自动识别本机透明代理 / sing-box·clash 类内核入站并参与优选；非 root 完全静默
 - **🐍 内嵌 yt-dlp 引擎**：Chaquopy 内嵌 Python 3.12 + yt-dlp（1083 模块），原生提取失败自动降级重试，Cookie 自动喂入
 - **🍪 浏览器容器登录**：内置 WebView 登录 X / Instagram，自动抓取 Cookie（含 HttpOnly），替代手动 DevTools 抠 Cookie
-- **🔄 本地导入**：扫描下载目录重登记，「同步其他目录」可导入任意文件夹的图片视频（文件保留原位）
+- **🔄 本地导入 / 共享目录**：扫描下载目录重登记；「同步其他目录」以共享引用模式接入任意文件夹（如 Edqiu 下载目录）——文件留原位、仅登记元数据，文件名 / sidecar 自动识别归并，导入时间按文件真实落盘时刻沉位，绝不霸占时间线顶部
 
 ---
 
@@ -64,10 +67,13 @@ Kotlin 2.0 · Jetpack Compose · 内嵌 yt-dlp · 代理自动优选 · 系统�
 │       ├── TaskManager.kt       # 收件箱捕获 → 队列（2 worker）→ 下载 → 入库
 │       ├── YtDlp.kt             # Chaquopy 桥：原生失败降级内嵌 yt-dlp
 │       ├── ProxyManager.kt      # 候选检测 / 测速评分 / 优选循环
+│       ├── RootProxy.kt         # Root 代理探测：透明代理 / 内核入站识别（非 root 静默）
+│       ├── VideoThumbs.kt       # 视频抽帧缩略图（fd 直传，兼容 ColorOS 16）
+│       ├── MediaFiles.kt        # 文件删除 / 残留清理 / 回收站物理删除
 │       ├── ClashConfig.kt       # Clash YAML / base64 订阅最小解析
 │       ├── ShareIn.kt           # 分享文本 → 链接提取（含 t.co 短链跟随）
 │       ├── CookieLoginActivity.kt  # WebView 容器登录抓 Cookie
-│       ├── Db.kt                # SQLite v4：authors/posts/media/tasks/proxy/inbox
+│       ├── Db.kt                # SQLite v5：authors/posts/media/tasks/proxy/inbox
 │       └── Background.kt        # 前台下载服务 + WorkManager 周期优选
 │   └── app/src/main/python/     # yt-dlp 纯源码直放（engine.py 提取引擎）
 ├── backend/              # PC 桌面版（Python 3.14 + FastAPI:8765 + SQLite WAL + gallery-dl）
@@ -106,6 +112,9 @@ Kotlin 2.0 · Jetpack Compose · 内嵌 yt-dlp · 代理自动优选 · 系统�
 | **M9**（09-06） | **无感分享链路闭环**：SEND 直达后台下载 + 悬浮胶囊通知（3.5s 淡出）+ 系统通知兜底；真机实测 X 主页 13 文件、Bluesky 67 文件 |
 | **T8.8**（09-07） | **内嵌 yt-dlp**：Chaquopy 16.0.0 打包 Python 3.12 + yt-dlp 全量源码（APK 55.8MB），受限内容自动降级重试 |
 | **Cookie 容器**（09-08） | WebView 容器登录 X / IG 自动抓 Cookie；修复 Compose `AndroidView` 承载 WebView 的全链高度归零问题（换传统 View 体系） |
+| **莫奈取色重构**（09-09） | 壁纸免权限取色 + 多点位采样派生三 seed（主/辅/第三色独立 TonalPalette）；取色缓存解决 ColorOS 16 重启后壁纸缓存未就绪导致取色失效 |
+| **素材库定型**（09-10） | **两级筛选**（来源 / 分组 / 类型，时间·日期手风琴 + 作者手风琴）；时间线按下载时间倒序；视频封面 ColorOS 16 修复（fd 直传 + 启动批量回填）；删除链路重构（文件删成功才清 DB + 残留清理兜底）；素材库下载完成即时刷新 + 「查看素材」胶囊 |
+| **共享目录 & Root 探测**（09-10） | Edqiu 共享目录接入（共享引用模式：sidecar / 文件名 / 手动三级识别，导入时间=文件真实落盘时刻，App 外文件删除保护）；Root 代理探测（su 会话识别透明代理与内核入站，实测 KernelSU + NetProxy-Magisk）；测速主源 0 字节自动换备用源重试 |
 
 ---
 
@@ -124,7 +133,7 @@ Kotlin 2.0 · Jetpack Compose · 内嵌 yt-dlp · 代理自动优选 · 系统�
 
 ### 安装
 
-1. 前往 [Releases](../../releases) 下载最新 APK（debug 构建，约 56MB）
+1. 从仓库 [`release/`](release) 目录下载最新 APK（debug 构建，约 54MB），或前往 [Releases](../../releases)
 2. 安装需 Android 8.0（API 26）及以上
 3. 首次启动授予通知权限（后台下载进度通知）
 

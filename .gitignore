@@ -12,6 +12,8 @@ local.properties
 *.aab
 *.ap_
 output-metadata.json
+# 仓库内随源码发布的 APK（反例上面 *.apk）
+!release/*.apk
 
 # IntelliJ / Android Studio
 *.iml
