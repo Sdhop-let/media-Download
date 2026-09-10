@@ -1,0 +1,34 @@
+[
+  {"type": "rectangle", "id": "token-zone", "x": 60, "y": 1660, "width": 2340, "height": 520, "backgroundColor": "#FAFAFA", "strokeColor": "#7373732E", "fillStyle": "solid", "strokeWidth": 1, "roughness": 0, "opacity": 100, "roundness": {"type": 3}},
+  {"type": "text", "id": "token-title", "x": 80, "y": 1676, "text": "设计令牌", "fontSize": 20, "fontFamily": 2, "color": "#16213E", "fontWeight": "bold", "textAlign": "left"},
+
+  {"type": "text", "id": "tk1-title", "x": 80, "y": 1720, "text": "文字与表面（浅 / 深）", "fontSize": 16, "fontFamily": 2, "color": "#16213E", "fontWeight": "bold", "textAlign": "left"},
+  {"type": "text", "id": "tk1-1", "x": 80, "y": 1756, "text": "主文字 #16213E / #EDF2FC · 次文字 #33456F / #A9B7D4", "fontSize": 14, "fontFamily": 2, "color": "#33456F", "textAlign": "left"},
+  {"type": "text", "id": "tk1-2", "x": 80, "y": 1800, "text": "弱文字 #94A0B8 / #6B7C9E · 分隔线 #DCE5F5 / #22304E", "fontSize": 14, "fontFamily": 2, "color": "#33456F", "textAlign": "left"},
+  {"type": "text", "id": "tk1-3", "x": 80, "y": 1844, "text": "输入底 #E8EEF9 / #16233F · 进度轨道 #E4EAF6 / #1B2944", "fontSize": 14, "fontFamily": 2, "color": "#33456F", "textAlign": "left"},
+  {"type": "text", "id": "tk1-4", "x": 80, "y": 1888, "text": "页面底 #EEF2FB→#E4EDFA / #0B1324→#101C38", "fontSize": 14, "fontFamily": 2, "color": "#33456F", "textAlign": "left"},
+
+  {"type": "text", "id": "tk2-title", "x": 640, "y": 1720, "text": "字号系统", "fontSize": 16, "fontFamily": 2, "color": "#16213E", "fontWeight": "bold", "textAlign": "left"},
+  {"type": "text", "id": "tk2-1", "x": 640, "y": 1756, "text": "9sp 眉题 · 3sp 宽字距（MEDIA DOWNLOADER）", "fontSize": 14, "fontFamily": 2, "color": "#33456F", "textAlign": "left"},
+  {"type": "text", "id": "tk2-2", "x": 640, "y": 1800, "text": "11sp 标签 / 状态胶囊 / 徽章 · 13.5sp 按钮", "fontSize": 14, "fontFamily": 2, "color": "#33456F", "textAlign": "left"},
+  {"type": "text", "id": "tk2-3", "x": 640, "y": 1844, "text": "14sp 区块标题 · 15sp 正文 / 设置行", "fontSize": 14, "fontFamily": 2, "color": "#33456F", "textAlign": "left"},
+  {"type": "text", "id": "tk2-4", "x": 640, "y": 1888, "text": "21sp 页头大标题（Bold）", "fontSize": 14, "fontFamily": 2, "color": "#33456F", "textAlign": "left"},
+
+  {"type": "text", "id": "tk3-title", "x": 1200, "y": 1720, "text": "圆角与间距", "fontSize": 16, "fontFamily": 2, "color": "#16213E", "fontWeight": "bold", "textAlign": "left"},
+  {"type": "text", "id": "tk3-1", "x": 1200, "y": 1756, "text": "圆角：15 按钮 · 18 输入框 · 24 卡片 · 100 胶囊", "fontSize": 14, "fontFamily": 2, "color": "#33456F", "textAlign": "left"},
+  {"type": "text", "id": "tk3-2", "x": 1200, "y": 1800, "text": "间距栅格 8dp · 卡片内边距 12dp", "fontSize": 14, "fontFamily": 2, "color": "#33456F", "textAlign": "left"},
+  {"type": "text", "id": "tk3-3", "x": 1200, "y": 1844, "text": "页面边距 16dp · 区块间隔 10dp", "fontSize": 14, "fontFamily": 2, "color": "#33456F", "textAlign": "left"},
+  {"type": "text", "id": "tk3-4", "x": 1200, "y": 1888, "text": "列表行高 44dp · 底部弹层内边距 20dp", "fontSize": 14, "fontFamily": 2, "color": "#33456F", "textAlign": "left"},
+
+  {"type": "text", "id": "tk4-title", "x": 1760, "y": 1720, "text": "玻璃参数", "fontSize": 16, "fontFamily": 2, "color": "#16213E", "fontWeight": "bold", "textAlign": "left"},
+  {"type": "text", "id": "tk4-1", "x": 1760, "y": 1756, "text": "投影：14dp ambient + spot（浅 #334C6FB4 / 深 #662F4C8F）", "fontSize": 14, "fontFamily": 2, "color": "#33456F", "textAlign": "left"},
+  {"type": "text", "id": "tk4-2", "x": 1760, "y": 1800, "text": "高光描边：1dp 白 rim（浅 55% / 深 15%）", "fontSize": 14, "fontFamily": 2, "color": "#33456F", "textAlign": "left"},
+  {"type": "text", "id": "tk4-3", "x": 1760, "y": 1844, "text": "玻璃渐变：45° 白高光（浅 B8→57 / 深 1C→07 透明度）", "fontSize": 14, "fontFamily": 2, "color": "#33456F", "textAlign": "left"},
+  {"type": "text", "id": "tk4-4", "x": 1760, "y": 1888, "text": "流光光斑：46dp 白（浅 55% / 深 30%），1.7s 往复", "fontSize": 14, "fontFamily": 2, "color": "#33456F", "textAlign": "left"},
+  {"type": "text", "id": "tk4-5", "x": 1760, "y": 1932, "text": "悬浮底栏：圆角 20dp · 玻璃底 · 选中项深蓝渐变胶囊", "fontSize": 14, "fontFamily": 2, "color": "#33456F", "textAlign": "left"},
+
+  {"type": "arrow", "id": "ar-tab1", "x": 660, "y": 302, "width": 140, "height": 88, "points": [[0, 0], [140, 88]], "startElementId": "tab-1", "endElementId": "phone-1", "strokeColor": "#737373", "strokeWidth": 1, "roughness": 0, "opacity": 100, "startArrowhead": null, "endArrowhead": "triangle", "roundness": null, "elbowed": false},
+  {"type": "arrow", "id": "ar-tab2", "x": 900, "y": 302, "width": 680, "height": 88, "points": [[0, 0], [680, 88]], "startElementId": "tab-2", "endElementId": "phone-2", "strokeColor": "#737373", "strokeWidth": 1, "roughness": 0, "opacity": 100, "startArrowhead": null, "endArrowhead": "triangle", "roundness": null, "elbowed": false},
+  {"type": "arrow", "id": "ar-tab3", "x": 1140, "y": 302, "width": 1, "height": 740, "points": [[0, 0], [0, 718], [-175, 718], [-175, 740]], "startElementId": "tab-3", "endElementId": "phone-3", "strokeColor": "#737373", "strokeWidth": 1, "roughness": 0, "opacity": 100, "startArrowhead": null, "endArrowhead": "triangle", "roundness": null, "elbowed": true},
+  {"type": "arrow", "id": "ar-tab4", "x": 1380, "y": 302, "width": 1, "height": 740, "points": [[0, 0], [0, 688], [350, 688], [350, 740]], "startElementId": "tab-4", "endElementId": "phone-4", "strokeColor": "#737373", "strokeWidth": 1, "roughness": 0, "opacity": 100, "startArrowhead": null, "endArrowhead": "triangle", "roundness": null, "elbowed": true}
+]

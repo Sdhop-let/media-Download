@@ -1,0 +1,220 @@
+{
+  "id": "lg-deepblue",
+  "version": 1,
+  "tags": [
+    "task",
+    "evidence-backed"
+  ],
+  "brandEvidence": {
+    "name": "Media Downloader Liquid Glass Design System",
+    "checkedAt": "2026-09-06",
+    "sources": [
+      {
+        "kind": "user-provided",
+        "reference": "项目内 IosUI.kt 设计系统：品牌深蓝 #2F4C8F（primary），渐变亮端 #4C6FB4、深端 #223660，强调 #8AA5E0，青绿 #61C7B0；Liquid Glass 玻璃拟态 + 浅/深双主题；用户明确指定主题色 #2F4C8F"
+      }
+    ],
+    "derivations": [
+      {
+        "role": "data.labelRoles[0].text",
+        "method": "wcag-contrast-choice",
+        "fill": "#8AA5E0",
+        "basis": "Compared #FFFFFF and #0A0A0A on #8AA5E0; chose #0A0A0A."
+      },
+      {
+        "role": "data.labelRoles[1].text",
+        "method": "wcag-contrast-choice",
+        "fill": "#61C7B0",
+        "basis": "Compared #FFFFFF and #0A0A0A on #61C7B0; chose #0A0A0A."
+      },
+      {
+        "role": "data.labelRoles[2].text",
+        "method": "wcag-contrast-choice",
+        "fill": "#4C6FB4",
+        "basis": "Compared #FFFFFF and #0A0A0A on #4C6FB4; chose #FFFFFF."
+      },
+      {
+        "role": "data.labelRoles[3].text",
+        "method": "wcag-contrast-choice",
+        "fill": "#9AA3AF",
+        "basis": "Compared #FFFFFF and #0A0A0A on #9AA3AF; chose #0A0A0A."
+      },
+      {
+        "role": "data.labelRoles[4].text",
+        "method": "wcag-contrast-choice",
+        "fill": "#223660",
+        "basis": "Compared #FFFFFF and #0A0A0A on #223660; chose #FFFFFF."
+      },
+      {
+        "role": "data.labelRoles[5].text",
+        "method": "wcag-contrast-choice",
+        "fill": "#1185FE",
+        "basis": "Compared #FFFFFF and #0A0A0A on #1185FE; chose #0A0A0A."
+      },
+      {
+        "role": "data.labelRoles[6].text",
+        "method": "wcag-contrast-choice",
+        "fill": "#2E9E7C",
+        "basis": "Compared #FFFFFF and #0A0A0A on #2E9E7C; chose #0A0A0A."
+      },
+      {
+        "role": "data.labelRoles[7].text",
+        "method": "wcag-contrast-choice",
+        "fill": "#C97A26",
+        "basis": "Compared #FFFFFF and #0A0A0A on #C97A26; chose #0A0A0A."
+      },
+      {
+        "role": "data.labelRoles[8].text",
+        "method": "wcag-contrast-choice",
+        "fill": "#C0433C",
+        "basis": "Compared #FFFFFF and #0A0A0A on #C0433C; chose #FFFFFF."
+      }
+    ]
+  },
+  "document": {
+    "background": "#EEF2FB",
+    "text": "#16213E",
+    "mutedText": "#33456F",
+    "connector": "#737373",
+    "primaryConnector": "#2F4C8F"
+  },
+  "node": {
+    "neutral": {
+      "fill": "#FFFFFF",
+      "stroke": "#7373735C",
+      "text": "#16213E"
+    },
+    "primary": {
+      "fill": "#2F4C8F",
+      "stroke": "#2F4C8F",
+      "text": "#FFFFFF"
+    },
+    "emphasis": {
+      "fill": "#DDE6FA",
+      "stroke": "#2F4C8F",
+      "text": "#16213E"
+    },
+    "secondary": {
+      "fill": "#FAFAFA",
+      "stroke": "#7373732E",
+      "text": "#16213E"
+    }
+  },
+  "style": {
+    "shape": {
+      "roughness": 0,
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "fillStyle": "solid",
+      "opacity": 100,
+      "roundness": {
+        "type": 3
+      }
+    },
+    "text": {
+      "fontFamily": "helvetica",
+      "fontFamilyAliases": [
+        2,
+        "2"
+      ],
+      "codeFontFamily": "cascadia",
+      "codeFontFamilyAliases": [
+        3,
+        "3"
+      ],
+      "fontSize": 16,
+      "groupTitleFontSize": 20,
+      "titleFontSize": 28
+    },
+    "arrow": {
+      "roughness": 0,
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "opacity": 100,
+      "route": "straight",
+      "startArrowhead": null,
+      "endArrowhead": "triangle",
+      "roundness": null,
+      "elbowed": false
+    },
+    "allowed": {
+      "strokeWidths": [
+        1,
+        2
+      ],
+      "strokeStyles": [
+        "solid",
+        "dashed"
+      ],
+      "rectangleRoundnessTypes": [
+        null,
+        3
+      ],
+      "arrowRoutes": [
+        "straight",
+        "elbowed",
+        "curved"
+      ],
+      "arrowheads": [
+        null,
+        "triangle"
+      ]
+    }
+  },
+  "data": {
+    "accents": [
+      "#223660",
+      "#1185FE"
+    ],
+    "other": "#9AA3AF",
+    "labelRoles": [
+      {
+        "fill": "#8AA5E0",
+        "text": "#0A0A0A"
+      },
+      {
+        "fill": "#61C7B0",
+        "text": "#0A0A0A"
+      },
+      {
+        "fill": "#4C6FB4",
+        "text": "#FFFFFF"
+      },
+      {
+        "fill": "#9AA3AF",
+        "text": "#0A0A0A"
+      },
+      {
+        "fill": "#223660",
+        "text": "#FFFFFF"
+      },
+      {
+        "fill": "#1185FE",
+        "text": "#0A0A0A"
+      },
+      {
+        "fill": "#2E9E7C",
+        "text": "#0A0A0A"
+      },
+      {
+        "fill": "#C97A26",
+        "text": "#0A0A0A"
+      },
+      {
+        "fill": "#C0433C",
+        "text": "#FFFFFF"
+      }
+    ]
+  },
+  "semantic": {
+    "ok": "#2E9E7C",
+    "warn": "#C97A26",
+    "err": "#C0433C"
+  },
+  "series": [
+    "#2F4C8F",
+    "#8AA5E0",
+    "#61C7B0",
+    "#4C6FB4"
+  ]
+}

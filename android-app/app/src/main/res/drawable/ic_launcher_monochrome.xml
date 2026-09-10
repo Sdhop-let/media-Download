@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 桌面图标 · 单色层：Android 13+ 主题图标（系统动态取色），仅箭头 + 托盘描边，无三点 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:pathData="M31.82,66.21 H76.17 A6.11,6.11 0 0 1 82.28,72.32 A6.11,6.11 0 0 1 76.17,78.42 H31.82 A6.11,6.11 0 0 1 25.71,72.32 A6.11,6.11 0 0 1 31.82,66.21 Z"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="3.2"/>
+    <path
+        android:pathData="M54,24.43 V57.85 M39.85,43.71 L54,57.85 L68.14,43.71"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="7.07"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"/>
+</vector>

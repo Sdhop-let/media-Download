@@ -1,0 +1,10 @@
+{
+  "update": [
+    {"id": "p1-input", "set": {"backgroundColor": "#FAFAFA"}},
+    {"id": "p3-seg", "set": {"backgroundColor": "#FAFAFA"}},
+    {"id": "p3-manual", "set": {"backgroundColor": "#FAFAFA"}},
+    {"id": "p2-grid", "set": {"backgroundColor": "#FAFAFA"}},
+    {"id": "p3-cand", "set": {"backgroundColor": "#FAFAFA"}},
+    {"id": "p2-chips", "set": {"backgroundColor": "#FAFAFA"}}
+  ]
+}

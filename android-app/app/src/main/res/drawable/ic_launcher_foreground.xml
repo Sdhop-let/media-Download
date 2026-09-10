@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 桌面图标 · 前景层：白玻璃下载箭头 + 托盘 + 三平台色点（图形收于中心 Ø66dp 安全区） -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:pathData="M31.82,66.21 H76.17 A6.11,6.11 0 0 1 82.28,72.32 A6.11,6.11 0 0 1 76.17,78.42 H31.82 A6.11,6.11 0 0 1 25.71,72.32 A6.11,6.11 0 0 1 31.82,66.21 Z"
+        android:fillColor="#2EFFFFFF"
+        android:strokeColor="#9EFFFFFF"
+        android:strokeWidth="1.67"/>
+    <path
+        android:pathData="M40.5,72.32 m-2.76,0 a2.76,2.76 0 1,0 5.52,0 a2.76,2.76 0 1,0 -5.52,0"
+        android:fillColor="#FF16213E"/>
+    <path
+        android:pathData="M54,72.32 m-2.76,0 a2.76,2.76 0 1,0 5.52,0 a2.76,2.76 0 1,0 -5.52,0"
+        android:fillColor="#FFE1306C"/>
+    <path
+        android:pathData="M67.5,72.32 m-2.76,0 a2.76,2.76 0 1,0 5.52,0 a2.76,2.76 0 1,0 -5.52,0"
+        android:fillColor="#FF1185FE"/>
+    <path
+        android:pathData="M54,24.43 V57.85 M39.85,43.71 L54,57.85 L68.14,43.71"
+        android:strokeColor="#F5FFFFFF"
+        android:strokeWidth="7.07"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"/>
+</vector>

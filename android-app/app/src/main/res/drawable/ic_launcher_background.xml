@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 桌面图标 · 背景层：莫奈蓝对角渐变 + 极光光斑 + 左缘玻璃高光带（ICON_DESIGN.md §3.2） -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:pathData="M0,0h108v108h-108z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="0"
+                android:startY="0"
+                android:endX="108"
+                android:endY="108"
+                android:type="linear">
+                <item android:offset="0" android:color="#FF5C82C9"/>
+                <item android:offset="0.55" android:color="#FF2F4C8F"/>
+                <item android:offset="1" android:color="#FF223660"/>
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path
+        android:pathData="M24.4,21.9 m-29.6,0 a29.6,29.6 0 1,0 59.2,0 a29.6,29.6 0 1,0 -59.2,0"
+        android:fillColor="#2161C7B0"/>
+    <path
+        android:pathData="M90,91.3 m-33.4,0 a33.4,33.4 0 1,0 66.8,0 a33.4,33.4 0 1,0 -66.8,0"
+        android:fillColor="#298AA5E0"/>
+    <path
+        android:pathData="M22.5,5.8 a16.7,16.7 0 0 1 16.7,16.7 v63 a16.7,16.7 0 0 1 -16.7,16.7 a16.7,16.7 0 0 1 -16.7,-16.7 v-63 a16.7,16.7 0 0 1 16.7,-16.7 z"
+        android:fillColor="#12FFFFFF"/>
+</vector>

@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>媒体下载器</title>
+<link rel="stylesheet" href="/static/css/app.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⬇️</text></svg>">
+</head>
+<body>
+<div id="app" v-cloak>
+
+  <!-- 侧边栏 -->
+  <aside class="sidebar">
+    <div class="logo"><span class="logo-ico">⬇</span><span>媒体下载器</span></div>
+    <nav class="nav">
+      <a v-for="p in pages" :key="p.id" href="javascript:void(0)"
+         :class="{active: page===p.id}" @click="go(p.id)">
+        <span class="nav-ico">{{ p.icon }}</span><span>{{ p.name }}</span>
+        <span v-if="p.id==='download' && activeCount" class="nav-badge">{{ activeCount }}</span>
+      </a>
+    </nav>
+    <div class="side-proxy" :class="proxyTone" @click="go('proxy')" title="查看代理详情">
+      <span class="dot"></span>
+      <div class="side-proxy-txt">
+        <b>{{ proxy.best }}</b>
+        <small>{{ proxy.testing ? '测速中…' : (proxy.best === '直连' ? '直连模式' : (bestLatency ? '延迟 '+bestLatency+'ms · ' : '') + proxy.modeLabel) }}</small>
+      </div>
+    </div>
+  </aside>
+
+  <!-- 主区域 -->
+  <main class="main">
+    <header class="topbar">
+      <h1>{{ pageTitle }}</h1>
+      <div class="top-actions">
+        <button class="icon-btn" @click="toggleTheme" :title="dark?'切到浅色':'切到深色'">{{ dark ? '🌙' : '☀️' }}</button>
+      </div>
+    </header>
+
+    <!-- ============ 下载页 ============ -->
+    <section v-show="page==='download'" class="page">
+      <div class="card paste-card">
+        <textarea v-model="pasteBox" rows="4" spellcheck="false"
+          placeholder="粘贴 X(Twitter) / Instagram / Bluesky 的帖子或主页链接，支持多行批量…&#10;例：https://x.com/xxx/status/123　https://bsky.app/profile/xxx　https://www.instagram.com/p/xxx/"></textarea>
+        <div class="paste-actions">
+          <button class="btn ghost" @click="parsePaste" :disabled="!pasteBox.trim() || parsing">
+            {{ parsing ? '解析中…' : '① 解析' }}</button>
+          <button class="btn primary" @click="startDownload" :disabled="!parsed.length">
+            开始下载（{{ parsed.length }}）</button>
+          <button class="btn ghost" v-if="parsed.length" @click="parsed=[]">清空</button>
+        </div>
+        <div v-if="parsed.length" class="parsed-list">
+          <div v-for="(p,i) in parsed" :key="i" class="parsed-item">
+            <span class="pbadge" :class="p.platform || 'other'">{{ platName(p.platform) }}</span>
+            <span class="parsed-url" :title="p.url">{{ p.url }}</span>
+            <a class="x" @click="parsed.splice(i,1)">✕</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="section-head"><h2>进行中</h2><span class="muted">{{ activeTasks.length }} 个任务</span></div>
+      <div v-if="!activeTasks.length" class="empty">暂无进行中的任务，粘贴链接开始下载吧</div>
+      <div v-for="t in activeTasks" :key="t.id" class="card task-card">
+        <div class="task-plat" :class="t.platform">{{ platName(t.platform) }}</div>
+        <div class="task-main">
+          <div class="task-top">
+            <span class="task-url" :title="t.url">{{ shortUrl(t.url) }}</span>
+            <span class="pill" :class="t.status">{{ statusText(t.status) }}</span>
+          </div>
+          <div class="bar"><div class="bar-fill" :style="{width: taskPct(t)+'%'}"></div></div>
+          <div class="task-meta">
+            <span>{{ t.done_files }}/{{ t.total_files || '?' }} 个文件</span>
+            <span v-if="t.skipped">跳过重复 {{ t.skipped }}</span>
+            <span v-if="t.status==='running' && t.speed">{{ fmtSpeed(t.speed) }}</span>
+            <span v-if="t.downloaded_bytes">{{ fmtBytes(t.downloaded_bytes) }}</span>
+            <span v-if="t.error" class="err-text">{{ t.error }}</span>
+            <span v-else-if="t.message" class="muted">{{ t.message }}</span>
+          </div>
+        </div>
+        <div class="task-acts">
+          <button v-if="t.status==='queued'||t.status==='running'" class="btn small ghost" @click="cancelTask(t)">取消</button>
+          <button v-if="['error','partial','canceled','done'].includes(t.status)" class="btn small ghost" @click="retryTask(t)">重试</button>
+          <button v-if="t.status==='done'" class="btn small ghost" @click="openTaskFolder(t)">打开目录</button>
+          <button class="btn small ghost" @click="delTask(t)">删除</button>
+        </div>
+      </div>
+
+      <div class="section-head">
+        <h2>历史任务</h2>
+        <div class="seg small">
+          <a v-for="f in taskFilters" :key="f.v" :class="{on: taskFilter===f.v}" @click="taskFilter=f.v">{{ f.n }}</a>
+        </div>
+      </div>
+      <div v-if="!historyTasks.length" class="empty">暂无历史任务</div>
+      <div v-for="t in historyTasks" :key="t.id" class="card task-row">
+        <span class="pill" :class="t.status">{{ statusText(t.status) }}</span>
+        <span class="pbadge small" :class="t.platform">{{ platName(t.platform) }}</span>
+        <span class="task-url grow" :title="t.url">{{ shortUrl(t.url) }}</span>
+        <span class="muted nowrap">{{ t.done_files }} 文件<template v-if="t.skipped"> · 跳过{{ t.skipped }}</template></span>
+        <span class="muted nowrap">{{ t.created_at }}</span>
+        <span class="row-acts">
+          <a title="回跳原帖" @click="openUrl(t.url)">↗</a>
+          <a v-if="t.status==='done'" title="打开目录" @click="openTaskFolder(t)">📁</a>
+          <a title="重试" @click="retryTask(t)">↻</a>
+          <a title="删除" @click="delTask(t)">🗑</a>
+        </span>
+      </div>
+    </section>
+
+    <!-- ============ 素材库 ============ -->
+    <section v-show="page==='library'" class="page">
+      <div class="lib-toolbar card">
+        <div class="seg">
+          <a :class="{on: lib.sort==='time'}" @click="setSort('time')">按时间</a>
+          <a :class="{on: lib.sort==='author'}" @click="setSort('author')">按作者</a>
+        </div>
+        <div class="chips">
+          <a v-for="p in platChips" :key="p.v" class="chip" :class="[{on: lib.platform===p.v}, p.v]"
+             @click="setPlatform(p.v)">{{ p.n }}</a>
+        </div>
+        <div class="chips" v-if="lib.sort==='time'">
+          <a v-for="t in typeChips" :key="t.v" class="chip" :class="{on: lib.type===t.v}"
+             @click="setType(t.v)">{{ t.n }}</a>
+        </div>
+        <input class="search" v-model.trim="lib.q" @input="searchDebounce" placeholder="搜索作者 / 内容…">
+        <span class="muted nowrap" v-if="lib.stats.total">{{ lib.stats.total }} 项 · {{ fmtBytes(lib.stats.bytes) }}</span>
+      </div>
+
+      <!-- 按时间 -->
+      <template v-if="lib.sort==='time'">
+        <div v-if="!lib.items.length" class="empty">{{ lib.loading ? '加载中…' : '还没有素材，去下载页添加任务吧' }}</div>
+        <div class="grid">
+          <div v-for="m in lib.items" :key="m.id" class="mcard">
+            <div class="mthumb" @click="lightbox=m">
+              <img v-if="thumbOf(m)" :src="fileUrl(thumbOf(m))" loading="lazy" @error="thumbFail($event, m)">
+              <div v-else class="mthumb-fallback">{{ m.media_type==='video' ? '🎬' : '🖼' }}</div>
+              <span v-if="m.media_type==='video'" class="vtag">▶ {{ fmtDur(m) }}</span>
+              <div class="mhover">
+                <a title="回跳原帖" @click.stop="openUrl(m.post_url)">↗</a>
+                <a title="作者主页" @click.stop="openUrl(m.profile_url)">@</a>
+                <a title="打开文件" @click.stop="openMedia(m,'file')">⧉</a>
+                <a title="删除" @click.stop="delMedia(m)">🗑</a>
+              </div>
+            </div>
+            <div class="mfoot">
+              <span class="pdot" :class="m.platform" :title="platName(m.platform)"></span>
+              <span class="mtime">{{ fmtTime(m.post_time) }}</span>
+              <a class="mauthor" @click="openUrl(m.profile_url)">@{{ m.handle }}</a>
+            </div>
+          </div>
+        </div>
+        <div class="load-more" v-if="lib.hasMore"><button class="btn ghost" @click="loadMedia(false)">加载更多</button></div>
+      </template>
+
+      <!-- 按作者 -->
+      <template v-else>
+        <div v-if="!lib.authors.length" class="empty">{{ lib.loading ? '加载中…' : '还没有素材' }}</div>
+        <div v-for="a in lib.authors" :key="a.id" class="author-block card">
+          <div class="ahead">
+            <img v-if="a.avatar_url" class="avatar" :src="a.avatar_url" @error="a.avatar_url=''">
+            <span v-else class="avatar avatar-fallback">{{ (a.name||a.handle||'?')[0].toUpperCase() }}</span>
+            <div class="ahead-main">
+              <b>{{ a.name || a.handle }}</b>
+              <small>@{{ a.handle }} · {{ a.media_count }} 项 · 最新 {{ fmtTime(a.latest_time) }}</small>
+            </div>
+            <span class="pbadge" :class="a.platform">{{ platName(a.platform) }}</span>
+            <a class="btn small ghost" @click="openUrl(a.profile_url)">↗ 主页</a>
+          </div>
+          <div class="grid inner">
+            <div v-for="m in a.items" :key="m.id" class="mcard">
+              <div class="mthumb" @click="lightbox=m">
+                <img v-if="thumbOf(m)" :src="fileUrl(thumbOf(m))" loading="lazy" @error="thumbFail($event, m)">
+                <div v-else class="mthumb-fallback">{{ m.media_type==='video' ? '🎬' : '🖼' }}</div>
+                <span v-if="m.media_type==='video'" class="vtag">▶</span>
+                <div class="mhover">
+                  <a title="回跳原帖" @click.stop="openUrl(m.post_url)">↗</a>
+                  <a title="打开文件" @click.stop="openMedia(m,'file')">⧉</a>
+                  <a title="删除" @click.stop="delMedia(m)">🗑</a>
+                </div>
+              </div>
+              <div class="mfoot"><span class="mtime">{{ fmtTime(m.post_time) }}</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="load-more" v-if="lib.hasMoreAuthors"><button class="btn ghost" @click="loadMedia(false)">更多作者</button></div>
+      </template>
+    </section>
+
+    <!-- ============ 代理页 ============ -->
+    <section v-show="page==='proxy'" class="page">
+      <div class="card proxy-hero">
+        <div class="ph-left">
+          <small>当前使用</small>
+          <div class="ph-proxy">{{ proxy.best }}</div>
+          <div class="muted">
+            {{ proxy.modeLabel }}
+            <template v-if="bestLatency && proxy.best!=='直连'"> · 延迟 {{ bestLatency }}ms · {{ bestSpeed }} Mbps</template>
+          </div>
+        </div>
+        <div class="ph-right">
+          <div class="mode-radios">
+            <label><input type="radio" value="auto" v-model="modeSel" @change="setMode"> 自动优选</label>
+            <label><input type="radio" value="manual" v-model="modeSel" @change="setMode"> 手动</label>
+            <label><input type="radio" value="direct" v-model="modeSel" @change="setMode"> 直连</label>
+          </div>
+          <input v-if="modeSel==='manual'" class="input" v-model.trim="manualProxy"
+                 placeholder="http://127.0.0.1:7897 或 socks5://…" @change="setMode">
+          <div class="ph-btns">
+            <button class="btn ghost" @click="detectProxy" :disabled="proxy.testing">{{ proxy.testing?'检测中…':'重新检测' }}</button>
+            <button class="btn primary" @click="testProxy" :disabled="proxy.testing">立即测速</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card opt-card">
+        <label class="switch-row">
+          <input type="checkbox" v-model="autoOpt" @change="saveOptimize">
+          <span>自动优选：周期复测所有候选，发现显著更优的代理时自动切换</span>
+        </label>
+        <div class="opt-interval">
+          每 <input class="input tiny" type="number" min="1" max="120" v-model.number="testInterval" @change="saveOptimize"> 分钟
+        </div>
+      </div>
+
+      <div class="section-head"><h2>候选代理</h2><span class="muted">评分 = 速度 ÷（1 + 延迟/300），越高越优</span></div>
+      <div class="card table-wrap">
+        <table class="tbl">
+          <thead><tr><th>来源</th><th>协议</th><th>地址</th><th>延迟</th><th>速度</th><th>评分</th><th>状态</th></tr></thead>
+          <tbody>
+            <tr v-for="c in proxy.candidates" :key="c.id" :class="{best: isBest(c)}">
+              <td>{{ c.source }}</td>
+              <td><span class="proto" :class="c.type">{{ c.type==='direct' ? '—' : c.type.toUpperCase() }}</span></td>
+              <td>{{ c.host ? c.host+':'+c.port : '—' }}</td>
+              <td>{{ c.latency_ms!=null ? c.latency_ms+'ms' : '—' }}</td>
+              <td>{{ c.speed_mbps!=null ? c.speed_mbps.toFixed(1)+' Mbps' : '—' }}</td>
+              <td><b>{{ c.alive ? c.score : '—' }}</b></td>
+              <td>
+                <span v-if="isBest(c)" class="pill running">使用中</span>
+                <span v-else-if="c.alive" class="pill done">可用</span>
+                <span v-else-if="c.latency_ms===null && c.last_tested" class="pill error">不可用</span>
+                <span v-else class="muted">待测</span>
+              </td>
+            </tr>
+            <tr v-if="!proxy.candidates.length"><td colspan="7" class="empty-cell">
+              {{ proxy.testing ? '正在检测与测速…' : '尚未检测，点击「重新检测」' }}</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="section-head"><h2>事件日志</h2></div>
+      <div class="card log-list">
+        <div v-for="l in proxyLog" :key="l.id" class="log-row">
+          <span class="muted nowrap">{{ l.ts }}</span>
+          <span class="log-tag" :class="logTone(l.event)">{{ l.event }}</span>
+          <span>{{ l.detail }}</span>
+        </div>
+        <div v-if="!proxyLog.length" class="empty">暂无日志</div>
+      </div>
+    </section>
+
+    <!-- ============ 设置页 ============ -->
+    <section v-show="page==='settings'" class="page narrow">
+      <div class="card form-card">
+        <h3>下载</h3>
+        <label class="field"><span>下载目录</span>
+          <input class="input" v-model.trim="settings.download_dir" placeholder="D:\Downloads\media">
+        </label>
+        <label class="field"><span>同时下载任务数（重启后生效）</span>
+          <input class="input tiny" type="number" min="1" max="8" v-model.number="settings.max_concurrency">
+        </label>
+      </div>
+      <div class="card form-card">
+        <h3>Cookies（浏览器导出的 cookies.txt）</h3>
+        <p class="hint">Instagram 必须配置；Twitter 主页批量下载需要；单条推文与 Bluesky 免登录。
+          导出方法见 README。</p>
+        <label class="field"><span>Twitter / X cookies.txt 路径</span>
+          <input class="input" v-model.trim="settings.cookies_twitter" placeholder="C:\data\twitter_cookies.txt">
+        </label>
+        <label class="field"><span>Instagram cookies.txt 路径</span>
+          <input class="input" v-model.trim="settings.cookies_instagram" placeholder="C:\data\instagram_cookies.txt">
+        </label>
+      </div>
+      <div class="form-actions">
+        <button class="btn primary" @click="saveSettings">保存设置</button>
+        <span class="ok-text" v-if="settingsSaved">✓ 已保存</span>
+      </div>
+      <div class="card about-card">
+        <h3>关于</h3>
+        <p>媒体下载器 v1.0 · 引擎 gallery-dl {{ settings.gallery_dl_version }} · 本地运行，数据保存在 <code>data/</code></p>
+      </div>
+    </section>
+  </main>
+
+  <!-- 灯箱预览 -->
+  <div v-if="lightbox" class="lightbox" @click.self="lightbox=null">
+    <div class="lightbox-body">
+      <video v-if="lightbox.media_type==='video' && isVideoFile(lightbox.file_path)"
+             :src="fileUrl(lightbox.file_path)" controls autoplay></video>
+      <img v-else :src="fileUrl(lightbox.file_path)" @error="lightbox=null">
+      <div class="lightbox-bar">
+        <span>@{{ lightbox.handle }} · {{ fmtTime(lightbox.post_time) }}</span>
+        <span class="row-acts big">
+          <a @click="openUrl(lightbox.post_url)">↗ 回跳原帖</a>
+          <a @click="openUrl(lightbox.profile_url)">@ 作者主页</a>
+          <a @click="openMedia(lightbox,'file')">⧉ 打开文件</a>
+          <a @click="lightbox=null">✕ 关闭</a>
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <div class="toasts">
+    <transition-group name="toast">
+      <div v-for="t in toasts" :key="t.id" class="toast" :class="t.level">{{ t.text }}</div>
+    </transition-group>
+  </div>
+</div>
+<script src="/static/vendor/vue.global.prod.js"></script>
+<script src="/static/js/app.js"></script>
+</body>
+</html>

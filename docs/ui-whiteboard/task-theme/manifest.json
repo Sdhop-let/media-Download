@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "primitives": "./primitives.json",
+  "defaultUiTheme": "warm-gray",
+  "defaultDiagramTheme": "lg-deepblue",
+  "uiThemes": {
+    "warm-gray": "./ui-theme.json"
+  },
+  "diagramThemes": {
+    "lg-deepblue": "./diagram-theme.json"
+  }
+}

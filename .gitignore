@@ -43,3 +43,18 @@ venv/
 *.log
 # 用户下载数据不入库
 data/
+
+# ===== WorkBuddy / 本机调试产物（含下载数据，不入库）=====
+.workbuddy/
+app_db.raw
+db64.txt
+*.db
+*.db-shm
+*.db-wal
+test_video.mp4
+ui.xml
+s1.png
+lib_cur.png
+
+# GitHub Push Protection：yt-dlp 上游 shahid 提取器内嵌 AWS 测试密钥，禁止入库
+android-app/app/src/main/python/yt_dlp/extractor/shahid.py

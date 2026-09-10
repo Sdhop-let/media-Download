@@ -1,0 +1,1171 @@
+﻿{
+  "themeId": "lg-deepblue",
+  "checkedElements": 111,
+  "violations": [
+    {
+      "elementId": "title",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "intro",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "ia-zone",
+      "property": "strokeStyle",
+      "expected": [
+        "solid",
+        "dashed"
+      ]
+    },
+    {
+      "elementId": "ia-title",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "ia-shell",
+      "property": "strokeStyle",
+      "expected": [
+        "solid",
+        "dashed"
+      ]
+    },
+    {
+      "elementId": "tab-1",
+      "property": "strokeStyle",
+      "expected": [
+        "solid",
+        "dashed"
+      ]
+    },
+    {
+      "elementId": "tab-2",
+      "property": "strokeStyle",
+      "expected": [
+        "solid",
+        "dashed"
+      ]
+    },
+    {
+      "elementId": "tab-3",
+      "property": "strokeStyle",
+      "expected": [
+        "solid",
+        "dashed"
+      ]
+    },
+    {
+      "elementId": "tab-4",
+      "property": "strokeStyle",
+      "expected": [
+        "solid",
+        "dashed"
+      ]
+    },
+    {
+      "elementId": "ia-note",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "ar-shell-nav",
+      "property": "strokeStyle",
+      "expected": [
+        "solid",
+        "dashed"
+      ]
+    },
+    {
+      "elementId": "ds-zone",
+      "property": "strokeStyle",
+      "expected": [
+        "solid",
+        "dashed"
+      ]
+    },
+    {
+      "elementId": "ds-title",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "sw-title",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "sw-primary",
+      "property": "strokeStyle",
+      "expected": [
+        "solid",
+        "dashed"
+      ]
+    },
+    {
+      "elementId": "sw-pa",
+      "property": "strokeStyle",
+      "expected": [
+        "solid",
+        "dashed"
+      ]
+    },
+    {
+      "elementId": "sw-pdeep",
+      "property": "strokeStyle",
+      "expected": [
+        "solid",
+        "dashed"
+      ]
+    },
+    {
+      "elementId": "sw-accent",
+      "property": "strokeStyle",
+      "expected": [
+        "solid",
+        "dashed"
+      ]
+    },
+    {
+      "elementId": "sw-teal",
+      "property": "strokeStyle",
+      "expected": [
+        "solid",
+        "dashed"
+      ]
+    },
+    {
+      "elementId": "sw-primary-lb",
+      "property": "fontSize",
+      "value": 13,
+      "expected": [
+        16,
+        20,
+        28
+      ]
+    },
+    {
+      "elementId": "sw-primary-lb",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "sw-pa-lb",
+      "property": "fontSize",
+      "value": 13,
+      "expected": [
+        16,
+        20,
+        28
+      ]
+    },
+    {
+      "elementId": "sw-pa-lb",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "sw-pdeep-lb",
+      "property": "fontSize",
+      "value": 13,
+      "expected": [
+        16,
+        20,
+        28
+      ]
+    },
+    {
+      "elementId": "sw-pdeep-lb",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "sw-accent-lb",
+      "property": "fontSize",
+      "value": 13,
+      "expected": [
+        16,
+        20,
+        28
+      ]
+    },
+    {
+      "elementId": "sw-accent-lb",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "sw-teal-lb",
+      "property": "fontSize",
+      "value": 13,
+      "expected": [
+        16,
+        20,
+        28
+      ]
+    },
+    {
+      "elementId": "sw-teal-lb",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "sw-ok",
+      "property": "strokeStyle",
+      "expected": [
+        "solid",
+        "dashed"
+      ]
+    },
+    {
+      "elementId": "sw-warn",
+      "property": "strokeStyle",
+      "expected": [
+        "solid",
+        "dashed"
+      ]
+    },
+    {
+      "elementId": "sw-err",
+      "property": "strokeStyle",
+      "expected": [
+        "solid",
+        "dashed"
+      ]
+    },
+    {
+      "elementId": "sw-ok-lb",
+      "property": "fontSize",
+      "value": 13,
+      "expected": [
+        16,
+        20,
+        28
+      ]
+    },
+    {
+      "elementId": "sw-ok-lb",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "sw-warn-lb",
+      "property": "fontSize",
+      "value": 13,
+      "expected": [
+        16,
+        20,
+        28
+      ]
+    },
+    {
+      "elementId": "sw-warn-lb",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "sw-err-lb",
+      "property": "fontSize",
+      "value": 13,
+      "expected": [
+        16,
+        20,
+        28
+      ]
+    },
+    {
+      "elementId": "sw-err-lb",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "sw-note",
+      "property": "fontSize",
+      "value": 14,
+      "expected": [
+        16,
+        20,
+        28
+      ]
+    },
+    {
+      "elementId": "sw-note",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "comp-title",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "comp-1",
+      "property": "fontSize",
+      "value": 14,
+      "expected": [
+        16,
+        20,
+        28
+      ]
+    },
+    {
+      "elementId": "comp-1",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "comp-2",
+      "property": "fontSize",
+      "value": 14,
+      "expected": [
+        16,
+        20,
+        28
+      ]
+    },
+    {
+      "elementId": "comp-2",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "comp-3",
+      "property": "fontSize",
+      "value": 14,
+      "expected": [
+        16,
+        20,
+        28
+      ]
+    },
+    {
+      "elementId": "comp-3",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "comp-4",
+      "property": "fontSize",
+      "value": 14,
+      "expected": [
+        16,
+        20,
+        28
+      ]
+    },
+    {
+      "elementId": "comp-4",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "comp-5",
+      "property": "fontSize",
+      "value": 14,
+      "expected": [
+        16,
+        20,
+        28
+      ]
+    },
+    {
+      "elementId": "comp-5",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "comp-6",
+      "property": "fontSize",
+      "value": 14,
+      "expected": [
+        16,
+        20,
+        28
+      ]
+    },
+    {
+      "elementId": "comp-6",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "comp-7",
+      "property": "fontSize",
+      "value": 14,
+      "expected": [
+        16,
+        20,
+        28
+      ]
+    },
+    {
+      "elementId": "comp-7",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "comp-8",
+      "property": "fontSize",
+      "value": 14,
+      "expected": [
+        16,
+        20,
+        28
+      ]
+    },
+    {
+      "elementId": "comp-8",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "comp-9",
+      "property": "fontSize",
+      "value": 14,
+      "expected": [
+        16,
+        20,
+        28
+      ]
+    },
+    {
+      "elementId": "comp-9",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "comp-10",
+      "property": "fontSize",
+      "value": 14,
+      "expected": [
+        16,
+        20,
+        28
+      ]
+    },
+    {
+      "elementId": "comp-10",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "rules-title",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "rule-1",
+      "property": "fontSize",
+      "value": 14,
+      "expected": [
+        16,
+        20,
+        28
+      ]
+    },
+    {
+      "elementId": "rule-1",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "rule-2",
+      "property": "fontSize",
+      "value": 14,
+      "expected": [
+        16,
+        20,
+        28
+      ]
+    },
+    {
+      "elementId": "rule-2",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "rule-3",
+      "property": "fontSize",
+      "value": 14,
+      "expected": [
+        16,
+        20,
+        28
+      ]
+    },
+    {
+      "elementId": "rule-3",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "rule-4",
+      "property": "fontSize",
+      "value": 14,
+      "expected": [
+        16,
+        20,
+        28
+      ]
+    },
+    {
+      "elementId": "rule-4",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "rule-5",
+      "property": "fontSize",
+      "value": 14,
+      "expected": [
+        16,
+        20,
+        28
+      ]
+    },
+    {
+      "elementId": "rule-5",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "theme-title",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "theme-light",
+      "property": "fontSize",
+      "value": 14,
+      "expected": [
+        16,
+        20,
+        28
+      ]
+    },
+    {
+      "elementId": "theme-light",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "theme-dark",
+      "property": "fontSize",
+      "value": 14,
+      "expected": [
+        16,
+        20,
+        28
+      ]
+    },
+    {
+      "elementId": "theme-dark",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "theme-toggle",
+      "property": "fontSize",
+      "value": 14,
+      "expected": [
+        16,
+        20,
+        28
+      ]
+    },
+    {
+      "elementId": "theme-toggle",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "page1-title",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "phone-1",
+      "property": "strokeStyle",
+      "expected": [
+        "solid",
+        "dashed"
+      ]
+    },
+    {
+      "elementId": "p1-header",
+      "property": "strokeStyle",
+      "expected": [
+        "solid",
+        "dashed"
+      ]
+    },
+    {
+      "elementId": "p1-input",
+      "property": "strokeStyle",
+      "expected": [
+        "solid",
+        "dashed"
+      ]
+    },
+    {
+      "elementId": "p1-btn",
+      "property": "strokeStyle",
+      "expected": [
+        "solid",
+        "dashed"
+      ]
+    },
+    {
+      "elementId": "p1-task1",
+      "property": "strokeStyle",
+      "expected": [
+        "solid",
+        "dashed"
+      ]
+    },
+    {
+      "elementId": "p1-task2",
+      "property": "strokeStyle",
+      "expected": [
+        "solid",
+        "dashed"
+      ]
+    },
+    {
+      "elementId": "p1-task3",
+      "property": "strokeStyle",
+      "expected": [
+        "solid",
+        "dashed"
+      ]
+    },
+    {
+      "elementId": "p1-bottom",
+      "property": "strokeStyle",
+      "expected": [
+        "solid",
+        "dashed"
+      ]
+    },
+    {
+      "elementId": "page2-title",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "phone-2",
+      "property": "strokeStyle",
+      "expected": [
+        "solid",
+        "dashed"
+      ]
+    },
+    {
+      "elementId": "p2-header",
+      "property": "strokeStyle",
+      "expected": [
+        "solid",
+        "dashed"
+      ]
+    },
+    {
+      "elementId": "p2-chips",
+      "property": "strokeStyle",
+      "expected": [
+        "solid",
+        "dashed"
+      ]
+    },
+    {
+      "elementId": "p2-grid",
+      "property": "strokeStyle",
+      "expected": [
+        "solid",
+        "dashed"
+      ]
+    },
+    {
+      "elementId": "p2-sheet",
+      "property": "strokeStyle",
+      "expected": [
+        "solid",
+        "dashed"
+      ]
+    },
+    {
+      "elementId": "p2-bottom",
+      "property": "strokeStyle",
+      "expected": [
+        "solid",
+        "dashed"
+      ]
+    },
+    {
+      "elementId": "page3-title",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "phone-3",
+      "property": "strokeStyle",
+      "expected": [
+        "solid",
+        "dashed"
+      ]
+    },
+    {
+      "elementId": "p3-header",
+      "property": "strokeStyle",
+      "expected": [
+        "solid",
+        "dashed"
+      ]
+    },
+    {
+      "elementId": "p3-current",
+      "property": "strokeStyle",
+      "expected": [
+        "solid",
+        "dashed"
+      ]
+    },
+    {
+      "elementId": "p3-seg",
+      "property": "strokeStyle",
+      "expected": [
+        "solid",
+        "dashed"
+      ]
+    },
+    {
+      "elementId": "p3-manual",
+      "property": "strokeStyle",
+      "expected": [
+        "solid",
+        "dashed"
+      ]
+    },
+    {
+      "elementId": "p3-btns",
+      "property": "strokeStyle",
+      "expected": [
+        "solid",
+        "dashed"
+      ]
+    },
+    {
+      "elementId": "p3-cand",
+      "property": "strokeStyle",
+      "expected": [
+        "solid",
+        "dashed"
+      ]
+    },
+    {
+      "elementId": "p3-bottom",
+      "property": "strokeStyle",
+      "expected": [
+        "solid",
+        "dashed"
+      ]
+    },
+    {
+      "elementId": "page4-title",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "phone-4",
+      "property": "strokeStyle",
+      "expected": [
+        "solid",
+        "dashed"
+      ]
+    },
+    {
+      "elementId": "p4-header",
+      "property": "strokeStyle",
+      "expected": [
+        "solid",
+        "dashed"
+      ]
+    },
+    {
+      "elementId": "p4-appear",
+      "property": "strokeStyle",
+      "expected": [
+        "solid",
+        "dashed"
+      ]
+    },
+    {
+      "elementId": "p4-storage",
+      "property": "strokeStyle",
+      "expected": [
+        "solid",
+        "dashed"
+      ]
+    },
+    {
+      "elementId": "p4-about",
+      "property": "strokeStyle",
+      "expected": [
+        "solid",
+        "dashed"
+      ]
+    },
+    {
+      "elementId": "p4-bottom",
+      "property": "strokeStyle",
+      "expected": [
+        "solid",
+        "dashed"
+      ]
+    },
+    {
+      "elementId": "token-zone",
+      "property": "strokeStyle",
+      "expected": [
+        "solid",
+        "dashed"
+      ]
+    },
+    {
+      "elementId": "token-title",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "tk1-title",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "tk1-1",
+      "property": "fontSize",
+      "value": 14,
+      "expected": [
+        16,
+        20,
+        28
+      ]
+    },
+    {
+      "elementId": "tk1-1",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "tk1-2",
+      "property": "fontSize",
+      "value": 14,
+      "expected": [
+        16,
+        20,
+        28
+      ]
+    },
+    {
+      "elementId": "tk1-2",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "tk1-3",
+      "property": "fontSize",
+      "value": 14,
+      "expected": [
+        16,
+        20,
+        28
+      ]
+    },
+    {
+      "elementId": "tk1-3",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "tk1-4",
+      "property": "fontSize",
+      "value": 14,
+      "expected": [
+        16,
+        20,
+        28
+      ]
+    },
+    {
+      "elementId": "tk1-4",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "tk2-title",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "tk2-1",
+      "property": "fontSize",
+      "value": 14,
+      "expected": [
+        16,
+        20,
+        28
+      ]
+    },
+    {
+      "elementId": "tk2-1",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "tk2-2",
+      "property": "fontSize",
+      "value": 14,
+      "expected": [
+        16,
+        20,
+        28
+      ]
+    },
+    {
+      "elementId": "tk2-2",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "tk2-3",
+      "property": "fontSize",
+      "value": 14,
+      "expected": [
+        16,
+        20,
+        28
+      ]
+    },
+    {
+      "elementId": "tk2-3",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "tk2-4",
+      "property": "fontSize",
+      "value": 14,
+      "expected": [
+        16,
+        20,
+        28
+      ]
+    },
+    {
+      "elementId": "tk2-4",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "tk3-title",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "tk3-1",
+      "property": "fontSize",
+      "value": 14,
+      "expected": [
+        16,
+        20,
+        28
+      ]
+    },
+    {
+      "elementId": "tk3-1",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "tk3-2",
+      "property": "fontSize",
+      "value": 14,
+      "expected": [
+        16,
+        20,
+        28
+      ]
+    },
+    {
+      "elementId": "tk3-2",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "tk3-3",
+      "property": "fontSize",
+      "value": 14,
+      "expected": [
+        16,
+        20,
+        28
+      ]
+    },
+    {
+      "elementId": "tk3-3",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "tk3-4",
+      "property": "fontSize",
+      "value": 14,
+      "expected": [
+        16,
+        20,
+        28
+      ]
+    },
+    {
+      "elementId": "tk3-4",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "tk4-title",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "tk4-1",
+      "property": "fontSize",
+      "value": 14,
+      "expected": [
+        16,
+        20,
+        28
+      ]
+    },
+    {
+      "elementId": "tk4-1",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "tk4-2",
+      "property": "fontSize",
+      "value": 14,
+      "expected": [
+        16,
+        20,
+        28
+      ]
+    },
+    {
+      "elementId": "tk4-2",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "tk4-3",
+      "property": "fontSize",
+      "value": 14,
+      "expected": [
+        16,
+        20,
+        28
+      ]
+    },
+    {
+      "elementId": "tk4-3",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "tk4-4",
+      "property": "fontSize",
+      "value": 14,
+      "expected": [
+        16,
+        20,
+        28
+      ]
+    },
+    {
+      "elementId": "tk4-4",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "tk4-5",
+      "property": "fontSize",
+      "value": 14,
+      "expected": [
+        16,
+        20,
+        28
+      ]
+    },
+    {
+      "elementId": "tk4-5",
+      "property": "textAlign",
+      "expected": "left"
+    },
+    {
+      "elementId": "ar-tab1",
+      "property": "strokeStyle",
+      "expected": [
+        "solid",
+        "dashed"
+      ]
+    },
+    {
+      "elementId": "ar-tab2",
+      "property": "strokeStyle",
+      "expected": [
+        "solid",
+        "dashed"
+      ]
+    },
+    {
+      "elementId": "ar-tab3",
+      "property": "strokeStyle",
+      "expected": [
+        "solid",
+        "dashed"
+      ]
+    },
+    {
+      "elementId": "ar-tab4",
+      "property": "strokeStyle",
+      "expected": [
+        "solid",
+        "dashed"
+      ]
+    }
+  ],
+  "warnings": [
+    {
+      "elementId": "ar-shell-nav",
+      "property": "strokeWidth",
+      "value": 2,
+      "defaultValue": 1,
+      "reason": "仅用于核心路径或重点节点"
+    },
+    {
+      "elementId": "ar-tab3",
+      "property": "route",
+      "value": "elbowed",
+      "defaultValue": "straight",
+      "reason": "直角折线只用于跨区域或避障"
+    },
+    {
+      "elementId": "ar-tab4",
+      "property": "route",
+      "value": "elbowed",
+      "defaultValue": "straight",
+      "reason": "直角折线只用于跨区域或避障"
+    }
+  ]
+}

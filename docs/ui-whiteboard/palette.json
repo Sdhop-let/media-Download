@@ -1,0 +1,30 @@
+{
+  "id": "lg-deepblue",
+  "brand": {
+    "name": "Media Downloader Liquid Glass Design System",
+    "checkedAt": "2026-09-06",
+    "sources": [
+      {
+        "kind": "user-provided",
+        "reference": "项目内 IosUI.kt 设计系统：品牌深蓝 #2F4C8F（primary），渐变亮端 #4C6FB4、深端 #223660，强调 #8AA5E0，青绿 #61C7B0；Liquid Glass 玻璃拟态 + 浅/深双主题；用户明确指定主题色 #2F4C8F"
+      }
+    ]
+  },
+  "palette": {
+    "primary": "#2F4C8F",
+    "series": ["#2F4C8F", "#8AA5E0", "#61C7B0", "#4C6FB4"],
+    "other": "#9AA3AF",
+    "background": "#EEF2FB",
+    "text": "#16213E",
+    "mutedText": "#33456F",
+    "onPrimary": "#FFFFFF",
+    "emphasisFill": "#DDE6FA",
+    "emphasisText": "#16213E",
+    "accents": ["#223660", "#1185FE"],
+    "semantic": {
+      "ok": "#2E9E7C",
+      "warn": "#C97A26",
+      "err": "#C0433C"
+    }
+  }
+}
