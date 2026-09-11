@@ -18,7 +18,8 @@ class OptimizeWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
         Store.init(applicationContext)
         if (!Store.prefs.autoOptimize) return Result.success()
         if (Store.proxy.testing.value) return Result.success()
-        withContext(Dispatchers.IO) { Store.proxy.detectAndTest("后台优选") }
+        // 移动数据下后台只测延迟不跑吞吐，避免后台流量激增
+        withContext(Dispatchers.IO) { Store.proxy.detectAndTest("后台优选", testThroughput = !Store.proxy.meteredNetwork()) }
         return Result.success()
     }
 

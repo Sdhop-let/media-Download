@@ -19,8 +19,8 @@ android {
         applicationId = "com.ep.donwnloader"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
         ndk {
             // Python 解释器是原生组件：真机 arm64 + 模拟器 x86_64（无需安装 NDK）
             abiFilters += listOf("arm64-v8a", "x86_64")
@@ -30,6 +30,8 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
+            // 个人项目：release 通道复用 debug 签名，保证与已安装版本签名一致、可直接覆盖安装
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
     compileOptions {
@@ -67,6 +69,7 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")   // P0：凭据 EncryptedSharedPreferences（Keystore 主密钥）
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("androidx.work:work-runtime-ktx:2.9.1")
     implementation("androidx.media3:media3-exoplayer:1.5.1")

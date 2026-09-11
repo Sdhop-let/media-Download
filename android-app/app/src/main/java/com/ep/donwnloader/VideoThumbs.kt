@@ -47,14 +47,23 @@ object VideoThumbs {
     /** 惰性补生成封面：resolve 为空时在 IO 线程调用。成功会缓存并发起 DB 回写。 */
     fun ensure(media: MediaItem): File? {
         resolve(media)?.let { return it }
-        val video = File(media.filePath)
-        if (!video.isFile) {
-            Log.w(TAG, "ensure: 源视频不存在 ${media.filePath}")
-            return null
-        }
-        val out = generate(video)
+        // 外部共享路径（root 直读登记的原路径）：先按需物化单文件到 cache，再抽帧；
+        // 缩略图持久落本 App 私有 .thumbs_ext（绝不写属主目录）
+        val srcFile = File(media.filePath)
+        val foreign = !srcFile.isFile
+        val video: File = if (foreign) {
+            ContentAccess.local(media.filePath) ?: run {
+                Log.w(TAG, "ensure: 外部视频物化失败 ${media.filePath}")
+                return null
+            }
+        } else srcFile
+        val out = if (foreign) {
+            val persistent = ContentAccess.thumbOutFile(media.filePath)
+                ?: run { Log.w(TAG, "ensure: 缩略图输出位不可用"); return null }
+            generateTo(video, persistent)
+        } else generate(video)
         if (out == null) {
-            Log.w(TAG, "ensure: 生成失败 ${video.name}")
+            Log.w(TAG, "ensure: 生成失败 ${srcFile.name}")
             return null
         }
         cache[media.filePath] = out
@@ -83,24 +92,28 @@ object VideoThumbs {
         }
     }
 
-    /** 对视频文件抽帧生成 ≤520px 宽 JPEG 缩略图；任一环节失败返回 null（原因见日志）。 */
+    /** 对视频文件抽帧生成 ≤520px 宽 JPEG 缩略图（默认落视频旁 .thumbs）；失败返回 null（原因见日志）。 */
     fun generate(video: File): File? {
+        val dir = File(video.parentFile, ".thumbs").apply { mkdirs() }
+        return generateTo(video, File(dir, video.nameWithoutExtension + ".jpg"))
+    }
+
+    /** 抽帧写入指定输出位（外部视频场景由 ContentAccess.thumbOutFile 提供持久位置）。 */
+    fun generateTo(video: File, out: File): File? {
         return try {
-            val dir = File(video.parentFile, ".thumbs").apply { mkdirs() }
-            if (!dir.isDirectory) {
-                Log.w(TAG, "generate: .thumbs 目录创建失败 ${dir.absolutePath}")
+            if (out.parentFile?.mkdirs() == false && !out.parentFile!!.isDirectory) {
+                Log.w(TAG, "generateTo: 目录创建失败 ${out.parent}")
                 return null
             }
-            val out = File(dir, video.nameWithoutExtension + ".jpg")
             if (out.isFile && out.length() > 0L && validJpeg(out)) return out
             // 存在但损坏（截断/0 宽高）的旧缩略图：删掉重建
             if (out.exists()) {
-                Log.w(TAG, "generate: 旧缩略图损坏，重建 ${out.name}")
+                Log.w(TAG, "generateTo: 旧缩略图损坏，重建 ${out.name}")
                 out.delete()
             }
             val bitmap = extractFrame(video)
             if (bitmap == null) {
-                Log.w(TAG, "generate: 抽帧全失败 ${video.name} (${video.length()} bytes)")
+                Log.w(TAG, "generateTo: 抽帧全失败 ${video.name} (${video.length()} bytes)")
                 return null
             }
             val w = 520
@@ -108,13 +121,13 @@ object VideoThumbs {
             val scaled = Bitmap.createScaledBitmap(bitmap, w, h, true)
             out.outputStream().use { scaled.compress(Bitmap.CompressFormat.JPEG, 82, it) }
             if (!validJpeg(out)) {
-                Log.w(TAG, "generate: 写出的 JPEG 校验失败 ${out.absolutePath} size=${out.length()}")
+                Log.w(TAG, "generateTo: 写出的 JPEG 校验失败 ${out.absolutePath} size=${out.length()}")
                 return null
             }
-            Log.i(TAG, "generate: OK ${out.name} size=${out.length()}")
+            Log.i(TAG, "generateTo: OK ${out.name} size=${out.length()}")
             out
         } catch (t: Throwable) {
-            Log.w(TAG, "generate: 异常 ${video.name}: ${t.javaClass.simpleName}: ${t.message}")
+            Log.w(TAG, "generateTo: 异常 ${video.name}: ${t.javaClass.simpleName}: ${t.message}")
             null
         }
     }

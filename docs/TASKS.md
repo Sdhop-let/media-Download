@@ -124,3 +124,22 @@
 - x.com `/i/web/status/` 形式的链接（无 handle）走 gallery-dl 兜底
 - Bluesky 视频为 HLS，v1 经 gallery-dl 通道下载
 - gallery-dl 通道（子进程）为文件级进度（按已完成文件数），自研通道为字节级进度
+
+## 作者统计（2026-09-11，真机验证待设备接入）
+- ✅ Db.kt：新增 `AuthorStatRow`（id/平台/handle/名字/头像/素材数/图片/视频/帖子数/容量/最近入库）+ `authorStats(platform, type, origin)`——按当前筛选聚合每位作者素材维度，素材数降序、容量次序，只含有素材作者（与作者视图口径一致）
+- ✅ LibraryScreen.kt：顶部统计玻璃块「图片/视频」行扩为三格，新增可点「作者」格（数字=当前筛选下有素材的作者数，标签带 ▸ 提示）；`authorStatRows` 随 stats 同 LaunchedEffect 刷新（mediaVersion/reload/筛选变化均触发）
+- ✅ AuthorStatsSheet 弹层（与 MediaSheet 同款玻璃风格）：汇总行「N 位作者 · M 项素材 · 容量 · 当前筛选」；排行行=头像+名字+@handle·图/视拆分·帖数+素材数/容量+主色占比条（以榜首为基准，最低 4% 保底可见）；点行跳作者分组视图并展开该作者（跨分组经 pendingAuthorJump，规避 filterChanged 重置手风琴）
+- ⏳ 真机验证：本轮设备未连接（adb devices 空），待插线后跑 install -r → 弹层截图闭环
+
+## 同步其他目录·取消+进度（2026-09-11，真机验证待设备接入）
+- ✅ TaskManager.syncExternalDir 加协作取消：签名扩为 (dirPath, isCancelled: ()=>Boolean, onProgress: (phase,done,total,registered)=>Unit)；检查点=File 通道逐文件指纹 / root 通道 40 条分批（md5sum）/ 逐条登记循环；取消即返回部分报告（已入库保留、refresh+mediaVersion 保证 UI 一致，幂等登记天然续传）
+- ✅ ExternalSyncReport 扩字段：cancelled / total（两阶段进度分母）
+- ✅ SyncExternalScreen：AtomicBoolean cancelFlag + SyncProgress 状态；同步中显示真实进度条（IosProgress pct=done/total，原为无限条）+ 文案「校验指纹 X/Y → 登记 X/Y·已入库 Z」+「取消同步」按钮；取消结果文案「已取消：本次已入库 N（重复跳过 M）…再次同步自动续传」（绿色非报错）；说明文字补取消语义
+- ⏳ 真机验证：设备仍未连接，与作者统计一并插线后闭环
+
+## 同步其他目录·整体退订（2026-09-11，用户二次澄清：要的是事后移除而非过程取消）
+- 需求澄清：用户「如果我不需要这个目录里面东西，现在没有取消按钮」→ 指同步后反悔无入口；过程取消已做（上一节），本轮做**目录级退订**
+- ✅ Db.kt：likeEscape（LIKE 通配转义）+ externalDirMedia(prefix, excludeBase)（列子树条目含回收站）+ removeExternalDirRows（COUNT→DELETE 硬删登记行）；匹配规则 `prefix'/%'` 目录边界安全（不误伤兄弟目录），排除 App 私有目录前缀（只退外部共享条目）
+- ✅ TaskManager：countExternalDir（预览计数）+ removeExternalDir（退订执行：清理 App 内缩略图文件 → 硬删登记行 → refresh + mediaVersion++；文件一律不动，posts/authors 留孤儿——不进视图、再同步 upsertPost 复用归并不丢，与 purgeEntries 行为一致）
+- ✅ SyncExternalScreen：「移除该目录登记」按钮（!syncing && !removing 才可点）→ IO 计数 → 0 则 toast「该目录暂无已登记素材」→ ConfirmDialog（红字「解除登记」，文案注明文件保留原位/可再同步）→ 执行后 result 行显示「已解除登记 N 项」；说明文字补退订语义
+- ⏳ 真机验证：设备仍未连接，三项（作者统计/同步取消/目录退订）插线后一并闭环

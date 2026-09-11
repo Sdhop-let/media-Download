@@ -38,9 +38,9 @@ class ExtractError(msg: String) : Exception(msg)
 // ---------------- URL 识别 ----------------
 
 object Extractors {
-    private val TW_STATUS = Regex("(?:twitter\\.com|x\\.com)/([A-Za-z0-9_]{1,15})/status(?:es)?/(\\d+)")
-    private val TW_STATUS_I = Regex("(?:twitter\\.com|x\\.com)/i/web?/status/(\\d+)")
-    private val IG_POST = Regex("instagram\\.com/(?:[^/?#]+/)?(?:p|reel|reels|tv)/([\\w-]+)")
+    private val TW_STATUS = Regex("(?:twitter\\.com|x\\.com)/([A-Za-z0-9_]{1,15})/status(?:es)?/(\\d+)", RegexOption.IGNORE_CASE)
+    private val TW_STATUS_I = Regex("(?:twitter\\.com|x\\.com)/i/web?/status/(\\d+)", RegexOption.IGNORE_CASE)
+    private val IG_POST = Regex("instagram\\.com/(?:[^/?#]+/)?(?:p|reel|reels|tv)/([\\w-]+)", RegexOption.IGNORE_CASE)
     private val BSKY_POST = Regex("bsky\\.app/profile/([\\w.\\-]+)/post/([a-z0-9]+)", RegexOption.IGNORE_CASE)
 
     private val TW_RESERVED = setOf("i", "home", "explore", "notifications", "messages", "settings",
@@ -66,8 +66,10 @@ object Extractors {
             return Detected("bluesky", "post", h, rid, "https://bsky.app/profile/$h/post/$rid")
         }
         // 主页识别
-        val noScheme = url.removePrefix("https://").removePrefix("http://")
-        val host = noScheme.substringBefore('/').removePrefix("www.")
+        val noScheme = url.let { u ->
+            if (u.startsWith("https://", true) || u.startsWith("http://", true)) u.substringAfter("://", u) else u
+        }
+        val host = noScheme.substringBefore('/').removePrefix("www.").lowercase()
         val path = noScheme.substringAfter('/').substringBefore('?').substringBefore('#').trim('/')
         val segs = path.split('/').filter { it.isNotBlank() }
         when {
@@ -271,7 +273,8 @@ object Extractors {
         while (fetched < maxPosts) {
             var url = "https://public.api.bsky.app/xrpc/app.bsky.feed.getAuthorFeed" +
                 "?actor=$handle&limit=${minOf(50, maxPosts - fetched)}&filter=posts_with_media"
-            if (cursor != null) url += "&cursor=$cursor"
+            // 服务端返回的分页 token 未编码拼接可被注入参数，需编码后拼接
+            if (cursor != null) url += "&cursor=" + java.net.URLEncoder.encode(cursor, "UTF-8")
             val j = http.getJson(url)
             val feed = j.optJSONArray("feed") ?: break
             for (i in 0 until feed.length()) {
@@ -303,11 +306,16 @@ object Extractors {
     fun igUserAgent() = IG_UA
     fun igAppId() = IG_APP_ID
 
-    private fun shortcodeToId(sc: String): String {
+    /** IG shortcode → media id；含字母表外字符返回 null（调用方给明确错误，不静默错算）。 */
+    private fun shortcodeToId(sc: String): Long? {
         val alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
         var id = 0L
-        for (ch in sc) id = id * 64 + alphabet.indexOf(ch).coerceAtLeast(0)
-        return id.toString()
+        for (ch in sc) {
+            val v = alphabet.indexOf(ch)
+            if (v < 0) return null
+            id = id * 64 + v
+        }
+        return id
     }
 
     private fun igMediaRef(m: JSONObject, idx: Int): MediaRef? {
@@ -351,7 +359,7 @@ object Extractors {
 
     fun instagramPost(shortcode: String, http: Http, cookie: String): PostMeta {
         if (cookie.isBlank()) throw ExtractError("需要 Instagram Cookies：在设置页填入浏览器导出的 sessionid")
-        val mid = shortcodeToId(shortcode)
+        val mid = shortcodeToId(shortcode) ?: throw ExtractError("无效的 Instagram 帖子链接（shortcode 含非法字符）")
         val j = http.getJson("https://i.instagram.com/api/v1/media/$mid/info/", igHeaders(cookie))
         val item = j.optJSONArray("items")?.optJSONObject(0)
             ?: throw ExtractError("帖子获取失败（Cookies 可能过期或帖子不可见）")
@@ -369,7 +377,8 @@ object Extractors {
         var cursor: String? = null
         while (posts.size < maxPosts) {
             var url = "https://i.instagram.com/api/v1/feed/user/$uid/?count=33"
-            if (cursor != null) url += "&max_id=$cursor"
+            // 服务端返回的分页 token 未编码拼接可被注入参数，需编码后拼接
+            if (cursor != null) url += "&max_id=" + java.net.URLEncoder.encode(cursor, "UTF-8")
             val j = http.getJson(url, igHeaders(cookie))
             val items = j.optJSONArray("items") ?: break
             for (i in 0 until items.length()) {

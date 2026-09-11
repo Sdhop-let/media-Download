@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
@@ -42,7 +43,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
-import java.io.File
 
 /**
  * 全屏竖滑视频流（效仿 X 播放页，2026-09-10 用户定型）：
@@ -85,17 +85,27 @@ private fun FeedPage(m: MediaItem, isCurrent: Boolean, onDismiss: () -> Unit) {
     // 沉浸式覆盖层：播放开始 1.5s 后自动淡出全部文字/按钮；点击画面唤出/隐藏；暂停时常显
     var overlayVisible by remember(m.id) { mutableStateOf(true) }
 
+    // 播放源：自有路径直接用；外部共享路径（root 直读登记的原路径）先按需物化到 cache
+    // （su cat 流式单文件复制，秒级），prepare 就绪后才允许 playWhenReady
+    var prepared by remember(m.id) { mutableStateOf(false) }
     val player = remember(m.id) {
-        androidx.media3.exoplayer.ExoPlayer.Builder(ctx).build().apply {
-            setMediaItem(androidx.media3.common.MediaItem.fromUri(Uri.fromFile(File(m.filePath))))
-            prepare()
-        }
+        androidx.media3.exoplayer.ExoPlayer.Builder(ctx).build()
     }
     DisposableEffect(m.id) { onDispose { player.release() } }
-    // 翻页状态复位 + 播放控制：当前页且未暂停才播（修复：paused 变化必须联动 playWhenReady）
-    LaunchedEffect(isCurrent, paused) {
+    LaunchedEffect(m.id) {
+        val src = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            ContentAccess.local(m.filePath)
+        }
+        if (src != null) {
+            player.setMediaItem(androidx.media3.common.MediaItem.fromUri(Uri.fromFile(src)))
+            player.prepare()
+            prepared = true
+        }
+    }
+    // 翻页状态复位 + 播放控制：当前页且未暂停且已就绪才播（修复：paused 变化必须联动 playWhenReady）
+    LaunchedEffect(isCurrent, paused, prepared) {
         if (!isCurrent) { paused = false; overlayVisible = true }
-        player.playWhenReady = isCurrent && !paused
+        player.playWhenReady = isCurrent && !paused && prepared
     }
     // 沉浸计时：播放中且覆盖层可见 → 1.5s 后淡出（key 含 overlayVisible：点击唤出后重新计时）
     LaunchedEffect(isCurrent, paused, overlayVisible) {
@@ -121,6 +131,19 @@ private fun FeedPage(m: MediaItem, isCurrent: Boolean, onDismiss: () -> Unit) {
             },
             modifier = Modifier.fillMaxSize(),
         )
+
+        // 外部视频物化/缓冲期指示（root 直读：首播前 su cat 单文件，秒级）
+        if (!prepared && isCurrent) {
+            Column(
+                Modifier.align(Alignment.Center),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                androidx.compose.material3.CircularProgressIndicator(
+                    color = Color.White, strokeWidth = 3.dp, modifier = Modifier.size(34.dp))
+                Spacer(Modifier.height(10.dp))
+                Text("准备中…", color = Color.White.copy(alpha = 0.8f), fontSize = 13.sp)
+            }
+        }
 
         // 覆盖层（顶栏 + 头像 ID 行 + 暂停钮）：随 overlayVisible 整体淡入淡出
         androidx.compose.animation.AnimatedVisibility(

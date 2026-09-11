@@ -14,6 +14,9 @@ data class CaptureResult(val added: Int, val dup: Int, val newIds: List<Long>)
 /** 任务完成脉冲：有新素材入库时置值，驱动下载页「查看素材」跳转胶囊。 */
 data class DonePulse(val taskId: Long, val doneFiles: Int)
 
+/** 同一目标文件正被其他任务下载时抛出；上层捕获后只跳过、不删对方正在写的 dest。 */
+class DestBusyException(msg: String) : Exception(msg)
+
 /** 下载任务引擎：收件箱捕获 + 队列 + 路由回退 + 去重入库。 */
 class TaskManager {
     val tasks = MutableStateFlow<List<TaskItem>>(emptyList())
@@ -22,8 +25,8 @@ class TaskManager {
     val donePulse = MutableStateFlow<DonePulse?>(null)
 
     private val queue = Channel<Long>(Channel.UNLIMITED)
-    private val cancelFlags = HashMap<Long, Boolean>()
-    private val fails = HashMap<Long, Int>()
+    private val cancelFlags = java.util.concurrent.ConcurrentHashMap<Long, Boolean>()
+    private val fails = java.util.concurrent.ConcurrentHashMap<Long, Int>()
 
     fun start() {
         repeat(2) { Store.scope.launch(Dispatchers.IO) { worker() } }
@@ -64,7 +67,7 @@ class TaskManager {
             val url = u.trim()
             if (url.isEmpty()) continue
             val det = Extractors.detect(url) ?: continue
-            val existing = Store.db.listInbox().any { it.url == url }
+            val existing = Store.db.inboxUrlExists(url)
             if (existing) { dup++; continue }
             val id = Store.db.captureInbox(url, det.platform, det.kind)
             newIds.add(id)
@@ -118,7 +121,7 @@ class TaskManager {
     /** 批量下载收件箱项。 */
     fun downloadInbox(ids: List<Long>) {
         var started = 0
-        for (id in ids) {
+        for (id in ids.distinct()) {
             val item = Store.db.inboxItem(id) ?: continue
             if (item.status == "downloading") continue
             val tid = Store.db.insertTask(item.url, item.platform, item.kind)
@@ -300,11 +303,11 @@ class TaskManager {
         for (m in post.media) {
             if (canceled(id)) throw InterruptedException()
 
-            // ---- 既有行判定（DB + 文件双验证） ----
+            // ---- 既有行判定（DB + 文件双验证；外部共享路径走 root stat，不误判丢失） ----
             val hit = Store.db.mediaCheck(prow, m.index)
             if (hit != null) {
                 val fileOk = hit.filePath.isNotBlank() &&
-                    File(hit.filePath).let { it.exists() && it.length() > 0 }
+                    ContentAccess.existsRemote(hit.filePath)
                 if (hit.deleted && fileOk) {
                     // 回收站已有 → 识别到即恢复，文件本体还在不必重下
                     Store.db.restoreMedia(hit.rowId)
@@ -316,11 +319,15 @@ class TaskManager {
                 if (!hit.deleted && fileOk) {
                     bump(id, skipped = 1); continue
                 }
-                // DB 在文件丢（无论是否在回收站）→ 重下复用该行
-                val dest = File(hit.filePath.ifBlank { destFile(post, m).absolutePath })
+                // DB 在文件丢（无论是否在回收站）→ 重下复用该行；
+                // 旧路径是外部共享目录（属主已删）时必须落回本 App 自有目录，绝不写属主目录
+                val destPath = if (hit.filePath.isBlank() || ContentAccess.isForeign(hit.filePath))
+                    destFile(post, m).absolutePath else hit.filePath
+                val dest = File(destPath)
                 try {
                     bytes = downloadFile(id, m.url, dest, route, alt)
                 } catch (e: Exception) {
+                    if (e is DestBusyException) { bump(id, skipped = 1); continue }
                     fails[id] = (fails[id] ?: 0) + 1
                     dest.delete()
                     bump(id)
@@ -340,6 +347,7 @@ class TaskManager {
             try {
                 bytes = downloadFile(id, m.url, dest, route, alt)
             } catch (e: Exception) {
+                if (e is DestBusyException) { bump(id, skipped = 1); continue }
                 fails[id] = (fails[id] ?: 0) + 1
                 dest.delete()
                 bump(id)
@@ -404,6 +412,7 @@ class TaskManager {
     private fun destFile(post: PostMeta, m: MediaRef): File {
         val stamp = post.createdAt.removeSuffix("Z")
             .replace("-", "").replace("T", "_").replace(":", "").ifBlank { nowIso() }
+            .replace(Regex("[^0-9_]"), "")
         val safeHandle = post.author.handle.replace(Regex("[\\\\/:*?\"<>|\\s]+"), "_")
         val safePid = post.postId.replace(Regex("[\\\\/:*?\"<>|\\s]+"), "_")
         val dir = File(Store.appContext.getExternalFilesDir(null), "downloads/${post.platform}/$safeHandle")
@@ -416,46 +425,60 @@ class TaskManager {
         id: Long, url: String, dest: File, route: String?, alt: String?,
     ): Long = withContext(Dispatchers.IO) {
         dest.parentFile?.mkdirs()
-        val tmp = File(dest.absolutePath + ".part")
-        // 成功过的路由优先尝试（本次会话内沿用）
-        val mem = routeMemory[id]
-        val attempts = buildList {
-            if (mem != null) add(mem)
-            add(route)
-            if (alt != null && alt != route) add(alt)
-        }.distinct()
-        var last: Exception? = null
-        for (r in attempts) {
-            for (tryI in 0 until 2) {
-                try {
-                    val client = Net.client(r)
-                    val req = Request.Builder().url(url).header("User-Agent", Http.UA).get().build()
-                    client.newCall(req).execute().use { resp ->
-                        if (!resp.isSuccessful) throw Exception("HTTP ${resp.code}")
-                        val src = resp.body?.byteStream() ?: throw Exception("空响应")
-                        tmp.outputStream().use { out ->
-                            src.copyTo(out, bufferSize = 1 shl 16)
+        val tmp = File(dest.absolutePath + ".t${id}.part")  // 带 taskId，并发同 URL 互不踩踏
+        // 同一 dest 与 .part 同时未被占用才下载；否则本任务尚未落盘，抛互斥异常由上层只跳过不删文件
+        if (!activePaths.add(dest.absolutePath) || !activePaths.add(tmp.absolutePath))
+            throw DestBusyException("同一文件正被其他任务下载，已跳过")
+        try {
+            // 成功过的路由优先尝试（本次会话内沿用）
+            val mem = routeMemory[id]
+            val attempts = buildList {
+                if (mem != null) add(mem)
+                add(route)
+                if (alt != null && alt != route) add(alt)
+            }.distinct()
+            var last: Exception? = null
+            for (r in attempts) {
+                for (tryI in 0 until 2) {
+                    try {
+                        val client = Net.client(r)
+                        val req = Request.Builder().url(url).header("User-Agent", Http.UA).get().build()
+                        client.newCall(req).execute().use { resp ->
+                            if (!resp.isSuccessful) throw Exception("HTTP ${resp.code}")
+                            val src = resp.body?.byteStream() ?: throw Exception("空响应")
+                            tmp.outputStream().use { out ->
+                                src.copyTo(out, bufferSize = 1 shl 16)
+                            }
                         }
-                    }
-                    val size = tmp.length()
-                    if (size == 0L) throw Exception("空文件")
-                    if (!tmp.renameTo(dest)) {
-                        tmp.copyTo(dest, overwrite = true)
+                        val size = tmp.length()
+                        if (size == 0L) throw Exception("空文件")
+                        if (!tmp.renameTo(dest)) {
+                            tmp.copyTo(dest, overwrite = true)
+                            tmp.delete()
+                        }
+                        if (r != route) routeMemory[id] = r  // 记住成功路由
+                        return@withContext size
+                    } catch (e: Exception) {
+                        last = e
                         tmp.delete()
+                        if (tryI == 0) kotlinx.coroutines.delay(800)
                     }
-                    if (r != route) routeMemory[id] = r  // 记住成功路由
-                    return@withContext size
-                } catch (e: Exception) {
-                    last = e
-                    tmp.delete()
-                    if (tryI == 0) kotlinx.coroutines.delay(800)
                 }
             }
+            throw Exception("下载失败: ${last?.message ?: last}")
+        } finally {
+            activePaths.remove(dest.absolutePath)
+            activePaths.remove(tmp.absolutePath)
         }
-        throw Exception("下载失败: ${last?.message ?: last}")
     }
 
-    private val routeMemory = HashMap<Long, String?>()
+    private val routeMemory = java.util.concurrent.ConcurrentHashMap<Long, String?>()
+
+    /** 活跃下载的 dest 与 .part 绝对路径集合（.part 带 taskId 区分并发）；供残留清理排除。 */
+    private val activePaths = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    /** 暴露活跃下载路径（dest 与 .part），MediaFiles.residueSweep 在清理前排除以防误删。 */
+    fun activeDownloadPaths(): Set<String> = activePaths
 
     /** 视频抽帧做缩略图；失败返回空串。复用 VideoThumbs 健壮抽帧。 */
     private fun makeVideoThumb(video: File): String =
@@ -566,15 +589,20 @@ class TaskManager {
         return added
     }
 
-    // ---------- 外部目录同步（Edqiu 智能导入：三级识别 + 搬运归档 + 双重去重） ----------
+    // ---------- 外部目录同步（Edqiu 智能导入：三级识别 + 共享引用 + Root 镜像通道） ----------
 
-    /** 同步预检统计：媒体总数 / 可识别 Edqiu 来源数 / 其余普通文件数。 */
-    data class ExternalProbe(val total: Int, val edqiu: Int, val plain: Int)
+    /** 同步预检统计：媒体总数 / 可识别 Edqiu 来源数 / 其余普通文件数 / 是否走了 Root 镜像。 */
+    data class ExternalProbe(val total: Int, val edqiu: Int, val plain: Int, val rootMirror: Boolean = false)
 
-    /** 同步结果：入库 / 内容重复跳过 / 归真实作者 / 识别推文但作者未知 / 普通导入。 */
+    /** 同步结果：入库 / 内容重复跳过 / 归真实作者 / 识别推文但作者未知 / 普通导入 / Root 镜像。 */
     data class ExternalSyncReport(
         val registered: Int, val skippedDup: Int,
         val authorized: Int, val tweetOnly: Int, val plain: Int,
+        val rootMirror: Boolean = false,
+        /** 用户取消：已入库部分保留，可再次同步续传（幂等登记）。 */
+        val cancelled: Boolean = false,
+        /** 本次待登记候选总数（指纹+登记两阶段的进度分母）。 */
+        val total: Int = 0,
     )
 
     /** Edqiu sidecar（.meta.json）关键字段。 */
@@ -584,14 +612,23 @@ class TaskManager {
     )
 
     /** 读 Edqiu sidecar：tweetId 无效且文件名也不匹配 → 视为无效元数据。 */
-    private fun readEdqiuMeta(f: File): EdqiuMeta? = try {
-        val mf = File(f.absolutePath + EDQIU_META_SUFFIX)
-        if (!mf.isFile) null
+    private fun readEdqiuMeta(f: File): EdqiuMeta? {
+        val text = f.resolveSibling(f.name + EDQIU_META_SUFFIX).takeIf { it.isFile }?.readText()
+            ?: return null
+        return try { parseEdqiuMeta(text, f.name) } catch (_: Exception) { null }
+    }
+
+    /**
+     * 解析 sidecar JSON 文本（root 直读改造后 sidecar 内容可能来自 su cat，
+     * 文本来源与文件系统解耦）。fileName 用于文件名兜底 tweetId。
+     */
+    private fun parseEdqiuMeta(text: String?, fileName: String): EdqiuMeta? = try {
+        if (text.isNullOrBlank()) null
         else {
-            val j = org.json.JSONObject(mf.readText())
+            val j = org.json.JSONObject(text)
             val tid = j.optString("tweetId", "")
             val tidOk = tid.matches(Regex("\\d{11,25}"))
-            val nameId = EDQIU_NAME.matchEntire(f.name)?.groupValues?.get(2)
+            val nameId = EDQIU_NAME.matchEntire(fileName)?.groupValues?.get(2)
             if (!tidOk && nameId == null) null
             else EdqiuMeta(
                 tweetId = if (tidOk) tid else nameId!!,
@@ -652,9 +689,12 @@ class TaskManager {
     }
 
     /**
-     * 外部目录同步（2026-09-11 共享引用模式）：扫描目录（含子目录）中的图片/视频，
+     * 外部目录同步（2026-09-11 root 直读改造）：扫描目录（含子目录）中的图片/视频，
      * 三级识别后【登记进素材库，文件保留原位】——外部目录归其属主 App（如 Edqiu）持续管理，
      * 本 App 只做只读引用：属主新下载的文件，下次同步自动增量入账。
+     * 读通道：File API 可读走本地；不可读（Android/data 私有目录）+ 已 root 走 su 直读——
+     * 目录枚举/size/mtime 单次命令直出、sidecar 文本 su cat、哈希 md5sum 远端直出，
+     * 【零镜像零复制】，登记 file_path = 原路径。
      * - L1 sidecar：读 Edqiu .meta.json → tweetId 归并推文（posts 唯一键）、真实 handle/显示名/文案入库；
      * - L2 文件名兜底：{handle}_{tweetId}_{idx}_{kind}_{quality}.ext → 恢复作者与推文归属；
      * - L3 普通文件：挂 local「导入素材」，行为与旧版一致。
@@ -664,25 +704,100 @@ class TaskManager {
      * sidecar 一并不动（Edqiu 收件箱 DownloadMonitor 靠它配对，删了会破坏属主生态）。
      * origin 标记：L1/L2 命中或路径含 com.ed.edqiu → 'edqiu'，素材库角标可见来源；
      * 共享素材被本 App 删除时只解除登记、不物理删文件（MediaFiles.purgeEntries 同规则）。
+     * 可取消/进度（2026-09-11）：isCancelled 在「指纹分批」与「逐条登记」处轮询，取消即返回
+     * 部分报告（已入库条目保留，refresh 保证 UI 一致，再同步幂等续传）；onProgress 按
+     * phase="hash"（校验指纹）/ "register"（登记）上报 done/total 与已入库数。
      */
-    fun syncExternalDir(dirPath: String): ExternalSyncReport {
-        val dir = File(dirPath.trim())
-        if (!dir.isDirectory) throw Exception(UNREACHABLE_DIR_MSG)
+    fun syncExternalDir(
+        dirPath: String,
+        isCancelled: () -> Boolean = { false },
+        onProgress: (phase: String, done: Int, total: Int, registered: Int) -> Unit = { _, _, _, _ -> },
+    ): ExternalSyncReport {
+        val root = dirPath.trim()
+        val dir = File(root)
+        val useApi = dir.isDirectory     // File API 可读走本地；root 直读仅在不可读时启用
+        val entries: List<RootIO.RootEntry>? = if (useApi) null else {
+            if (!RootIO.available()) throw Exception(UNREACHABLE_DIR_MSG)
+            RootIO.listTree(root) ?: throw Exception(UNREACHABLE_DIR_MSG)
+        }
         var registered = 0; var skippedDup = 0
         var authorized = 0; var tweetOnly = 0; var plain = 0
-        dir.walkTopDown().filter { it.isFile && !it.name.startsWith(".") }.forEach { f ->
-            val ext = f.extension.lowercase()
-            if (ext !in MEDIA_EXTS) return@forEach
-            if (Store.db.mediaPathRegistered(f.absolutePath)) return@forEach  // 幂等：原路径已登记
-            // 内容级去重：同 MD5 且库内未删 → 跳过
-            val hash = fileHash(f)
+
+        // 统一候选抽象：File 通道与 root 通道都产出 (path, size, mtime, sidecarPath)
+        data class Cand(val path: String, val size: Long, val mtimeMs: Long, val sidecarPath: String?)
+        val cands = mutableListOf<Cand>()
+        if (useApi) {
+            dir.walkTopDown().filter { it.isFile && !it.name.startsWith(".") }.forEach { f ->
+                if (f.extension.lowercase() !in MEDIA_EXTS) return@forEach
+                val side = f.absolutePath + EDQIU_META_SUFFIX
+                cands.add(Cand(f.absolutePath, f.length(), f.lastModified(),
+                    if (File(side).isFile) side else null))
+            }
+        } else {
+            val sidecars = entries!!.filter { it.path.endsWith(EDQIU_META_SUFFIX) }
+                .mapTo(mutableSetOf()) { it.path.removeSuffix(EDQIU_META_SUFFIX) }
+            entries.forEach { e ->
+                val name = e.path.substringAfterLast('/')
+                if (name.startsWith(".") || e.path.substringAfterLast('.', "").lowercase() !in MEDIA_EXTS) return@forEach
+                cands.add(Cand(e.path, e.size, e.mtimeMs,
+                    if (sidecars.contains(e.path)) e.path + EDQIU_META_SUFFIX else null))
+            }
+        }
+
+        // 幂等：原路径已登记 → 跳过（root 直读登记原路径，二次同步天然幂等）
+        val fresh = cands.filter { !Store.db.mediaPathRegistered(it.path) }
+        val total = fresh.size
+        var cancelled = false
+
+        /** 取消检查点：置位后走 partial() 返回部分报告。 */
+        fun abortIfCancelled(): Boolean {
+            if (!isCancelled()) return false
+            cancelled = true
+            return true
+        }
+
+        /** 部分报告：已入库条目保留（refresh 让 UI 立即一致），cancelled=true 供 UI 区分文案。 */
+        fun partial(): ExternalSyncReport {
+            refresh()
+            if (registered > 0) Store.mediaVersion++
+            return ExternalSyncReport(registered, skippedDup, authorized, tweetOnly, plain,
+                !useApi, cancelled = true, total = total)
+        }
+
+        // 内容级去重：批量哈希（File 通道本地算；root 通道远端 md5sum 直出，零内容传输）
+        val hashOf = HashMap<String, String>()
+        if (fresh.isNotEmpty()) {
+            if (useApi) {
+                fresh.forEachIndexed { i, c ->
+                    if (abortIfCancelled()) return partial()
+                    hashOf[c.path] = fileHash(File(c.path))
+                    onProgress("hash", i + 1, total, 0)
+                }
+            } else {
+                // root 通道：40 个/条分批（与 md5Batch 内部一致），批次间可取消/报进度
+                fresh.map { it.path }.chunked(40).forEachIndexed { bi, chunk ->
+                    if (abortIfCancelled()) return partial()
+                    hashOf.putAll(RootIO.md5Batch(chunk))
+                    onProgress("hash", minOf((bi + 1) * 40, total), total, 0)
+                }
+            }
+        }
+
+        for ((idx, c) in fresh.withIndex()) {
+            if (abortIfCancelled()) return partial()
+            val hash = hashOf[c.path] ?: ""
             if (hash.isNotBlank()) {
                 val dup = Store.db.findByHash(hash)
-                if (dup != null && !dup.third) { skippedDup++; return@forEach }
+                if (dup != null && !dup.third) { skippedDup++; continue }
             }
-            val dlIso = mtimeIso(f.lastModified().takeIf { it > 0 } ?: System.currentTimeMillis())
-            val meta = readEdqiuMeta(f)
-            val nameHit = EDQIU_NAME.matchEntire(f.name)
+            val dlIso = mtimeIso(c.mtimeMs.takeIf { it > 0 } ?: System.currentTimeMillis())
+            val ext = c.path.substringAfterLast('.', "").lowercase()
+            val meta = if (c.sidecarPath != null) {
+                val text = if (useApi) runCatching { File(c.sidecarPath).readText() }.getOrNull()
+                           else RootIO.catText(c.sidecarPath)
+                parseEdqiuMeta(text, c.path.substringAfterLast('/'))
+            } else null
+            val nameHit = EDQIU_NAME.matchEntire(c.path.substringAfterLast('/'))
             if (meta != null || nameHit != null) {
                 // L1/L2：归并到真实推文 + 作者（handle 缺失走 twitter/unknown 占位）
                 val tweetId = meta?.tweetId ?: nameHit!!.groupValues[2]
@@ -701,41 +816,121 @@ class TaskManager {
                     "image" -> "photo"; "video" -> "video"
                     else -> if (ext in VIDEO_EXTS) "video" else "photo"
                 }
-                if (Store.db.addMedia(prow, -1, type, f.absolutePath, ext,
-                        f.length(), 0, 0, f.absolutePath, "", hash, "edqiu", dlIso)) {
+                if (Store.db.addMedia(prow, -1, type, c.path, ext,
+                        c.size, 0, 0, c.path, "", hash, "edqiu", dlIso)) {
                     registered++
                     if (isKnownHandle) authorized++ else tweetOnly++
                 }
             } else {
                 // L3：普通文件 → 导入素材（来源路径含 Edqiu 包名则打标）
                 val authorId = Store.db.upsertAuthor("local", "导入素材", "导入素材", "", "")
-                val pid = f.nameWithoutExtension.replace(Regex("[\\\\/:*?\"<>|\\s]+"), "_")
-                val prow = Store.db.upsertPost("local", pid, "", authorId, dlIso, f.name)
-                val origin = if (f.absolutePath.contains("com.ed.edqiu")) "edqiu" else ""
+                val base = c.path.substringAfterLast('/').substringBeforeLast('.')
+                val pid = base.replace(Regex("[\\\\/:*?\"<>|\\s]+"), "_")
+                val prow = Store.db.upsertPost("local", pid, "", authorId, dlIso, c.path.substringAfterLast('/'))
+                val origin = if (c.path.contains("com.ed.edqiu")) "edqiu" else ""
                 if (Store.db.addMedia(prow, -1,
                         if (ext in VIDEO_EXTS) "video" else "photo",
-                        f.absolutePath, ext, f.length(), 0, 0, f.absolutePath, "", hash, origin, dlIso)) {
+                        c.path, ext, c.size, 0, 0, c.path, "", hash, origin, dlIso)) {
                     registered++; plain++
                 }
             }
+            onProgress("register", idx + 1, total, registered)
         }
         refresh()
         if (registered > 0) Store.mediaVersion++
-        return ExternalSyncReport(registered, skippedDup, authorized, tweetOnly, plain)
+        return ExternalSyncReport(registered, skippedDup, authorized, tweetOnly, plain,
+            !useApi, cancelled = cancelled, total = total)
     }
 
-    /** 预检：验证目录可用并统计媒体数（含 Edqiu 来源识别计数）。 */
-    fun probeExternalDir(dirPath: String): ExternalProbe {
-        val dir = File(dirPath.trim())
-        if (!dir.isDirectory) throw Exception(UNREACHABLE_DIR_MSG)
-        var total = 0; var edqiu = 0
-        dir.walkTopDown().filter { it.isFile && !it.name.startsWith(".") }.forEach { f ->
-            if (f.extension.lowercase() !in MEDIA_EXTS) return@forEach
-            total++
-            if (File(f.absolutePath + EDQIU_META_SUFFIX).isFile ||
-                EDQIU_NAME.matches(f.name) || f.absolutePath.contains("com.ed.edqiu")) edqiu++
+    /**
+     * 目录退订计数（移除前预览用）：该目录子树下已登记（含回收站）的外部共享条目数。
+     */
+    fun countExternalDir(dirPath: String): Int {
+        val prefix = dirPath.trim().trimEnd('/')
+        if (prefix.isBlank()) return 0
+        val base = Store.appContext.getExternalFilesDir(null)?.absolutePath?.trimEnd('/') ?: ""
+        return Store.db.externalDirMedia(prefix, base).size
+    }
+
+    /**
+     * 目录退订（2026-09-11）：把某目录同步登记的素材整体解除登记（含回收站条目）。
+     * 文件一律不动——共享引用模式，原件归属主 App（如 Edqiu）管理；缩略图在本 App
+     * 私有目录内，顺带清理。posts/authors 留作孤儿（不进任何视图；再同步时 upsertPost
+     * 复用同一推文行，归并不丢，与 purgeEntries 的既有行为一致）。
+     * 目录边界安全：只匹配 prefix/' 子树，不会误伤前缀重叠的兄弟目录。
+     * 返回解除登记条数。
+     */
+    fun removeExternalDir(dirPath: String): Int {
+        val prefix = dirPath.trim().trimEnd('/')
+        if (prefix.isBlank()) throw Exception("先填写要退订的目录路径")
+        val base = Store.appContext.getExternalFilesDir(null)?.absolutePath?.trimEnd('/') ?: ""
+        val rows = Store.db.externalDirMedia(prefix, base)
+        rows.forEach { (_, t) -> if (t.isNotBlank()) MediaFiles.deleteDisk(t) }
+        val n = Store.db.removeExternalDirRows(prefix, base)
+        refresh()
+        if (n > 0) Store.mediaVersion++
+        android.util.Log.i("TaskManager", "removeExternalDir: prefix=$prefix 解除登记 $n 条（文件保留原位）")
+        return n
+    }
+
+    /**
+     * mirror 退役迁移（2026-09-11 root 直读改造）：旧版共享引用把镜像路径登记进库
+     * （…/files/mirror/<key12>/…），统一迁回原路径（镜像前缀 → 同步目录前缀），
+     * file_path 与 source_url 同时改指。幂等：无命中即跳过。
+     * 迁移后对所有【DB 零引用】的 key 子目录做退役清理（含历史换目录留下的旧 key），
+     * 正被占用的文件删失败不影响其余，下次启动自动重试。
+     */
+    fun migrateMirrorPaths(): Boolean {
+        val ext = Store.appContext.getExternalFilesDir(null) ?: return false
+        val mirrorRoot = File(ext, "mirror")
+        if (!mirrorRoot.isDirectory) return false
+        val syncDir = runCatching { Store.prefs.syncDir }.getOrNull()?.trim().orEmpty()
+        var changed = false
+        if (syncDir.isNotBlank()) {
+            val key = RootIO.key12(syncDir)
+            val mirrorPrefix = File(mirrorRoot, key).absolutePath + "/"
+            val n = Store.db.repointMirrorPaths(mirrorPrefix, syncDir.trimEnd('/') + "/")
+            if (n > 0) {
+                android.util.Log.i("TaskManager", "migrateMirrorPaths: $n rows repointed → $syncDir")
+                changed = true
+            }
         }
-        return ExternalProbe(total, edqiu, total - edqiu)
+        // 退役清理：任何 DB 零引用的 key 目录都删（mirror 通道已废，文件留在原路径）
+        mirrorRoot.listFiles()?.forEach { kd ->
+            if (kd.isDirectory && Store.db.countPathsUnder(kd.absolutePath + "/") == 0L) {
+                val ok = runCatching { kd.deleteRecursively() }.getOrDefault(false)
+                android.util.Log.i("TaskManager", "retire mirror ${kd.name}: ${if (ok) "deleted" else "retry next boot"}")
+            }
+        }
+        return changed
+    }
+
+    /** 预检：验证目录可达并统计媒体数（File API 可读走本地；不可读 + 已 root 走 su 直读枚举）。 */
+    fun probeExternalDir(dirPath: String): ExternalProbe {
+        val root = dirPath.trim()
+        val dir = File(root)
+        val useApi = dir.isDirectory
+        if (!useApi && !RootIO.available()) throw Exception(UNREACHABLE_DIR_MSG)
+        var total = 0; var edqiu = 0
+        if (useApi) {
+            dir.walkTopDown().filter { it.isFile && !it.name.startsWith(".") }.forEach { f ->
+                if (f.extension.lowercase() !in MEDIA_EXTS) return@forEach
+                total++
+                if (File(f.absolutePath + EDQIU_META_SUFFIX).isFile ||
+                    EDQIU_NAME.matches(f.name) || f.absolutePath.contains("com.ed.edqiu")) edqiu++
+            }
+        } else {
+            val entries = RootIO.listTree(root) ?: throw Exception(UNREACHABLE_DIR_MSG)
+            val sidecars = entries.filter { it.path.endsWith(EDQIU_META_SUFFIX) }
+                .mapTo(mutableSetOf()) { it.path.removeSuffix(EDQIU_META_SUFFIX) }
+            entries.forEach { e ->
+                val name = e.path.substringAfterLast('/')
+                if (name.startsWith(".") || e.path.substringAfterLast('.', "").lowercase() !in MEDIA_EXTS) return@forEach
+                total++
+                if (sidecars.contains(e.path) || EDQIU_NAME.matches(name) || e.path.contains("com.ed.edqiu")) edqiu++
+            }
+        }
+        return ExternalProbe(total, edqiu, total - edqiu, !useApi)
     }
 
     private fun profileUrlFor(platform: String, handle: String) = when (platform) {        "twitter" -> "https://x.com/$handle"
@@ -755,9 +950,11 @@ class TaskManager {
         private val VIDEO_EXTS = setOf("mp4", "webm", "mov", "m4v", "mkv")
         private val IMG_EXTS = setOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "heic")
         private val MEDIA_EXTS = VIDEO_EXTS + IMG_EXTS
-        /** 目录不可达的统一提示（Android 11+ 无法读其他应用 Android/data 私有目录，实测 MANAGE_EXTERNAL_STORAGE 也不放行）。 */
+        /** 目录不可达的统一提示（File API 与 Root 直读通道都不可用才会出现：
+         *  Android 11+ 无法读其他应用 Android/data 私有目录，且本机 Root 通道不可用）；
+         *  可将文件移到公共目录（如 /sdcard/EdqiuShare）后再同步。 */
         private const val UNREACHABLE_DIR_MSG =
-            "目录不存在或无权访问（系统限制读取其他应用的 Android/data 目录）；请先把文件移到公共目录（如 /sdcard/EdqiuExport）再同步"
+            "目录不存在或无权访问（系统限制读取其他应用的 Android/data 目录，且本机 Root 通道不可用）；可将文件移到公共目录（如 /sdcard/EdqiuShare）后再同步"
         /** Edqiu sidecar 后缀（媒体文件旁的元数据 JSON）。 */
         private const val EDQIU_META_SUFFIX = ".meta.json"
         /** Edqiu 内部引擎落盘命名：{uploader}_{tweetId}_{idx}_{kind}_{quality}.{ext}。 */

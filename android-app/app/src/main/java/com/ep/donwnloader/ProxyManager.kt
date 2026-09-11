@@ -29,11 +29,19 @@ class ProxyManager {
 
     @Volatile private var best: ProxyCand? = null
     @Volatile private var lastFullMs = 0L
+    @Volatile private var lastMeteredLog = false
 
     fun start() {
         Store.scope.launch(Dispatchers.IO) { detectAndTest("启动检测") }
         Store.scope.launch(Dispatchers.IO) { optimizeLoop() }
     }
+
+    /** 当前网络是否计费（移动数据等）；判断失败按非计费处理。 */
+    fun meteredNetwork(): Boolean = try {
+        val cm = Store.appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val caps = cm.activeNetwork?.let { cm.getNetworkCapabilities(it) }
+        caps != null && !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+    } catch (_: Exception) { false }
 
     // ---------- 路由 ----------
 
@@ -220,9 +228,15 @@ class ProxyManager {
 
     // ---------- 测速 ----------
 
-    suspend fun detectAndTest(reason: String) {
+    suspend fun detectAndTest(reason: String, testThroughput: Boolean = true) {
         if (testing.value) return
         testing.value = true
+        // 计费网络节流日志：移动数据下切换为按延迟优选，每进入一次计费会话只提示一次
+        if (testThroughput) lastMeteredLog = false
+        else if (!lastMeteredLog) {
+            Store.db.addProxyLog("计费网络", "移动数据下跳过吞吐测速，按延迟优选")
+            lastMeteredLog = true
+        }
         publish()
         try {
             val found = detect()
@@ -231,7 +245,7 @@ class ProxyManager {
                 c.copy(id = Store.db.upsertCandidate(c.type, c.host, c.port, c.source))
             }
             cands.value = list
-            testAll()
+            testAll(testThroughput)
             best = cands.value.filter { it.alive }.maxByOrNull { it.score }
             Store.db.addProxyLog("检测",
                 "$reason: 发现 ${found.size} 个候选，当前最优 ${bestLabel()}（评分 ${"%.2f".format(best?.score ?: 0.0)}）")
@@ -256,15 +270,20 @@ class ProxyManager {
     }
 
     /** 两阶段并发测速：阶段 1 全候选并发连通探测（快速排除死节点），
-     *  阶段 2 仅存活者并发测吞吐。总耗时 ≈ 探测超时 + 吞吐预算，与候选数量基本无关。 */
-    suspend fun testAll() = withContext(Dispatchers.IO) {
+     *  阶段 2 仅存活者测速（testThroughput=false 时改为按延迟评分，省移动流量）。
+     *  总耗时 ≈ 探测超时 + 吞吐预算，与候选数量基本无关。 */
+    suspend fun testAll(testThroughput: Boolean = true) = withContext(Dispatchers.IO) {
         val list = cands.value
         coroutineScope {
             list.map { c -> async { probeCandidate(c) } }.awaitAll()
         }
         val alive = list.filter { it.alive }
-        coroutineScope {
-            alive.map { c -> async { speedCandidate(c) } }.awaitAll()
+        if (testThroughput) {
+            coroutineScope {
+                alive.map { c -> async { speedCandidate(c) } }.awaitAll()
+            }
+        } else {
+            alive.forEach { latencyScoreCandidate(it) }
         }
         best = cands.value.filter { it.alive }.maxByOrNull { it.score }
         publish()
@@ -291,6 +310,14 @@ class ProxyManager {
         c.speedMbps = mbps; c.score = score
     }
 
+    /** 计费网络降级：不跑吞吐，仅按延迟评分（1000/(1+lat/300)），排序语义与吞吐分同向。 */
+    private fun latencyScoreCandidate(c: ProxyCand) {
+        val lat = c.latencyMs ?: return
+        val score = 1000.0 / (1.0 + lat / 300.0)
+        Store.db.updateCandidate(c.id, lat, null, score, true)
+        c.speedMbps = null; c.score = score
+    }
+
     // ---------- 持续优选 ----------
 
     private suspend fun optimizeLoop() {
@@ -304,14 +331,14 @@ class ProxyManager {
                         val manual = Store.prefs.manualProxy.trim()
                         if (manual.isNotBlank()) verifyManual(manual)
                     } else {
-                        detectAndTest("失败重试")
+                        detectAndTest("失败重试", testThroughput = !meteredNetwork())
                     }
                     continue
                 }
                 val interval = Store.prefs.intervalMin * 60_000L
                 if (System.currentTimeMillis() - lastFullMs < interval) continue
                 val prev = bestLabel()
-                detectAndTest("周期复测")
+                detectAndTest("周期复测", testThroughput = !meteredNetwork())
                 val now = bestLabel()
                 if (Store.prefs.autoOptimize && prev != now && best != null) {
                     val msg = "代理优选：自动切换 $prev → $now（评分 ${best?.score ?: 0}）"

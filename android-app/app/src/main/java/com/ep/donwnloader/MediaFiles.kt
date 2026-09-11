@@ -45,8 +45,9 @@ object MediaFiles {
         var ok = 0
         val failedIds = mutableListOf<Long>()
         rows.forEach { (id, f, t) ->
+            // 必须带分隔符，防前缀重叠目录（files vs files_evil）误判导致物理删外部文件
             val shared = f.isNotBlank() && base.isNotBlank() &&
-                !File(f).absolutePath.startsWith(base)
+                !File(f).absolutePath.startsWith(base + "/")
             val okF = if (shared) true else deleteDisk(f)
             val okT = deleteDisk(t)
             if (shared && okT) Log.i(TAG, "purgeEntries: 共享引用只解除登记（保留外部文件）$f")
@@ -75,8 +76,12 @@ object MediaFiles {
         if (!root.isDirectory) return 0 to 0
         val now = System.currentTimeMillis()
         var files = 0
+        // 活跃任务的 dest 与 .part 集合（Store 未初始化时为空集，保守不删）
+        val active = runCatching { Store.tasks.activeDownloadPaths() }.getOrDefault(emptySet())
         val all = root.walkBottomUp().filter { it.isFile }.toList()
         all.forEach { f ->
+            // 排除活跃任务正在下载的 dest 与 .part（配合 .part 带 taskId 命名），哪怕 mtime 超 10 分钟也不误删
+            if (f.absolutePath in active) return@forEach
             if (f.lastModified() > now - 10 * 60_000L) return@forEach  // 活跃文件保护
             val isPart = f.name.endsWith(".part")
             if (!isPart && f.extension.lowercase() !in MEDIA_EXTS) return@forEach

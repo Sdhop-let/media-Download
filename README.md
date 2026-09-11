@@ -9,7 +9,7 @@ Kotlin 2.0 · Jetpack Compose · 内嵌 yt-dlp · 代理自动优选 · 系统�
 [![Platform](https://img.shields.io/badge/platform-Android%208.0%2B-3DDC84)](#)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.0.21-7F52FF)](#)
 [![Compose](https://img.shields.io/badge/Compose-BOM%202024.12-4285F4)](#)
-[![Release](https://img.shields.io/badge/release-v1.0-E9573F)](#)
+[![Release](https://img.shields.io/badge/release-v1.1-E9573F)](#)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
 </div>
@@ -115,6 +115,7 @@ Kotlin 2.0 · Jetpack Compose · 内嵌 yt-dlp · 代理自动优选 · 系统�
 | **莫奈取色重构**（09-09） | 壁纸免权限取色 + 多点位采样派生三 seed（主/辅/第三色独立 TonalPalette）；取色缓存解决 ColorOS 16 重启后壁纸缓存未就绪导致取色失效 |
 | **素材库定型**（09-10） | **两级筛选**（来源 / 分组 / 类型，时间·日期手风琴 + 作者手风琴）；时间线按下载时间倒序；视频封面 ColorOS 16 修复（fd 直传 + 启动批量回填）；删除链路重构（文件删成功才清 DB + 残留清理兜底）；素材库下载完成即时刷新 + 「查看素材」胶囊 |
 | **共享目录 & Root 探测**（09-10） | Edqiu 共享目录接入（共享引用模式：sidecar / 文件名 / 手动三级识别，导入时间=文件真实落盘时刻，App 外文件删除保护）；Root 代理探测（su 会话识别透明代理与内核入站，实测 KernelSU + NetProxy-Magisk）；测速主源 0 字节自动换备用源重试 |
+| **v1.1**（09-11） | **凭据安全加固**：X/IG Cookie 与 Clash 订阅原文迁 EncryptedSharedPreferences（Keystore AES256-GCM，旧明文自动迁移删除），手动粘贴与容器抓取同链路加密；设置页 Cookie 默认掩码隐藏、点「显示」查看/编辑；关闭云备份；明文流量白名单化（仅媒体 CDN 域）；yt-dlp 恢复 TLS 证书校验；计费网络自动跳过吞吐测速（防后台流量失控）；并发与下载链路加固（ConcurrentHashMap、同文件互斥、.part 带 taskId、收件箱查重下沉 DB） |
 
 ---
 

@@ -31,6 +31,14 @@ data class AuthorItem(
     val latestTime: String, val items: List<MediaItem>,
 )
 
+/** 作者统计排行行（素材库「作者统计」弹层，2026-09-11 新增）：
+ *  按当前筛选聚合每位作者的素材数 / 图片视频拆分 / 帖子数 / 占用容量 / 最近入库时间。 */
+data class AuthorStatRow(
+    val id: Long, val platform: String, val handle: String, val name: String,
+    val avatarUrl: String, val mediaCount: Int, val photoCount: Int,
+    val videoCount: Int, val postCount: Int, val bytes: Long, val latestTime: String,
+)
+
 data class TaskItem(
     val id: Long, val url: String, val platform: String, val kind: String,
     val status: String, val error: String, val message: String,
@@ -481,7 +489,7 @@ class Db(context: Context) : SQLiteOpenHelper(context, "app.db", null, 6) {
         c.getString(21) ?: "", c.getString(22) ?: "")
 
     fun listMediaTime(platform: String, type: String, q: String, authorId: Long?, offset: Int, limit: Int,
-                      asc: Boolean = false, origin: String = ""): List<MediaItem> {
+                      asc: Boolean = false, origin: String = "", sortBase: String = "downloaded"): List<MediaItem> {
         val where = StringBuilder(" FROM media m JOIN posts p ON p.id=m.post_row_id JOIN authors a ON a.id=p.author_id WHERE m.deleted=0")
         val args = mutableListOf<String>()
         if (platform.isNotBlank()) { where.append(" AND p.platform=?"); args.add(platform) }
@@ -492,12 +500,21 @@ class Db(context: Context) : SQLiteOpenHelper(context, "app.db", null, 6) {
             where.append(" AND (p.text LIKE ? OR a.handle LIKE ? OR a.name LIKE ?)")
             val like = "%$q%"; args.add(like); args.add(like); args.add(like)
         }
-        // 时间视图排序（2026-09-10 用户定型）：按【下载时间】倒序——以帖子的最新下载时间分组，
-        // 同帖多图保持成组且组内 media_index 正序；同刻下载的帖子按发帖时间倒序；p.id 作最终稳定序
-        val newestDl = "(SELECT MAX(m2.downloaded_at) FROM media m2 " +
-            "WHERE m2.post_row_id = m.post_row_id AND m2.deleted = 0)"
-        val order = if (asc) "$newestDl ASC, p.created_at ASC, p.id ASC, m.media_index ASC"
-                    else "$newestDl DESC, p.created_at DESC, p.id DESC, m.media_index ASC"
+        // 时间视图排序基准（2026-09-11 用户拍板增加双基准切换）：
+        //  - "downloaded"：按【下载时间】倒序——以帖子的最新下载时间分组，同帖多图保持成组且组内
+        //    media_index 正序；同刻下载的帖子按发帖时间倒序；p.id 作最终稳定序。
+        //    特性：最近下载的一批永远聚在最新日期组（老帖重下载会浮顶）。
+        //  - "posted"：按【发帖时间】倒序——时间线即推文时间线，历史老帖（7 月/2024 年等）
+        //    沉回原发帖日期，不再霸占最近下载的日期组。
+        val order = if (sortBase == "posted") {
+            if (asc) "p.created_at ASC, p.id ASC, m.media_index ASC"
+            else "p.created_at DESC, p.id DESC, m.media_index ASC"
+        } else {
+            val newestDl = "(SELECT MAX(m2.downloaded_at) FROM media m2 " +
+                "WHERE m2.post_row_id = m.post_row_id AND m2.deleted = 0)"
+            if (asc) "$newestDl ASC, p.created_at ASC, p.id ASC, m.media_index ASC"
+            else "$newestDl DESC, p.created_at DESC, p.id DESC, m.media_index ASC"
+        }
         val sql = "SELECT $mediaCols$where ORDER BY $order LIMIT ? OFFSET ?"
         args.add(limit.toString()); args.add(offset.toString())
         return readableDatabase.rawQuery(sql, args.toTypedArray()).use { cur ->
@@ -533,6 +550,76 @@ class Db(context: Context) : SQLiteOpenHelper(context, "app.db", null, 6) {
             out
         }
         return rows.map { a -> a.copy(items = listMediaTime("", "", "", a.id, 0, perAuthor)) }
+    }
+
+    /**
+     * 作者统计排行（素材库「作者统计」弹层数据源，2026-09-11 新增）。
+     * 跟随当前筛选（platform / type / origin）聚合每位作者的素材维度，按素材数降序、容量次序。
+     * 只含有素材（media 未删除）的作者，与素材库作者视图口径一致。
+     */
+    fun authorStats(platform: String, type: String, origin: String): List<AuthorStatRow> {
+        val where = StringBuilder(
+            " FROM authors a JOIN posts p ON p.author_id=a.id JOIN media m ON m.post_row_id=p.id WHERE m.deleted=0")
+        val args = mutableListOf<String>()
+        if (platform.isNotBlank()) { where.append(" AND a.platform=?"); args.add(platform) }
+        if (origin.isNotBlank()) { where.append(" AND m.origin=?"); args.add(origin) }
+        if (type.isNotBlank()) { where.append(" AND m.media_type=?"); args.add(type) }
+        return readableDatabase.rawQuery(
+            """SELECT a.id, a.platform, a.handle, a.name, a.avatar_url,
+               COUNT(m.id) AS cnt,
+               SUM(CASE WHEN m.media_type='photo' THEN 1 ELSE 0 END) AS photos,
+               SUM(CASE WHEN m.media_type='video' THEN 1 ELSE 0 END) AS videos,
+               COUNT(DISTINCT p.id) AS posts,
+               COALESCE(SUM(m.file_size),0) AS bytes,
+               MAX(COALESCE(NULLIF(m.downloaded_at,''), p.created_at)) AS latest
+               $where
+               GROUP BY a.id ORDER BY cnt DESC, bytes DESC""",
+            args.toTypedArray()).use { cur ->
+            val out = mutableListOf<AuthorStatRow>()
+            while (cur.moveToNext()) {
+                out.add(AuthorStatRow(
+                    id = cur.getLong(0), platform = cur.getString(1) ?: "",
+                    handle = cur.getString(2) ?: "", name = cur.getString(3) ?: "",
+                    avatarUrl = cur.getString(4) ?: "",
+                    mediaCount = cur.getInt(5),
+                    photoCount = cur.getInt(6),
+                    videoCount = cur.getInt(7),
+                    postCount = cur.getInt(8),
+                    bytes = cur.getLong(9),
+                    latestTime = cur.getString(10) ?: "",
+                ))
+            }
+            out
+        }
+    }
+
+    /**
+     * mirror 退役迁移：把 file_path/source_url 的镜像前缀改指同步目录原路径。
+     * （2026-09-11 root 直读改造，条目登记回归「原路径共享引用」语义。）
+     * mirrorPrefix 以 / 结尾；返回受影响行数。
+     */
+    fun repointMirrorPaths(mirrorPrefix: String, srcPrefix: String): Int {
+        val stmt = readableDatabase.compileStatement(
+            "SELECT COUNT(*) FROM media WHERE file_path LIKE ? || '%'")
+        stmt.bindString(1, mirrorPrefix)
+        val n = stmt.simpleQueryForLong().toInt()
+        if (n == 0) return 0
+        val cut = mirrorPrefix.length + 1
+        writableDatabase.execSQL(
+            "UPDATE media SET file_path = ? || substr(file_path, ?), " +
+                "source_url = CASE WHEN source_url LIKE ? || '%' " +
+                "THEN ? || substr(source_url, ?) ELSE source_url END " +
+                "WHERE file_path LIKE ? || '%'",
+            arrayOf(srcPrefix, cut.toString(), mirrorPrefix, srcPrefix, cut.toString(), mirrorPrefix))
+        return n
+    }
+
+    /** 某路径前缀下仍被引用的条目数（mirror 退役删除的安全阀）。 */
+    fun countPathsUnder(prefix: String): Long {
+        val stmt = readableDatabase.compileStatement(
+            "SELECT COUNT(*) FROM media WHERE file_path LIKE ? || '%'")
+        stmt.bindString(1, prefix)
+        return stmt.simpleQueryForLong()
     }
 
     fun getMedia(id: Long): MediaItem? =
@@ -588,21 +675,52 @@ class Db(context: Context) : SQLiteOpenHelper(context, "app.db", null, 6) {
             "SELECT 1 FROM media WHERE file_path=? OR thumb_path=? LIMIT 1",
             arrayOf(path, path)).use { it.moveToFirst() }
 
+    /** SQL LIKE 通配转义（路径含 % _ \ 时不误匹配）。 */
+    private fun likeEscape(s: String): String =
+        s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+    /**
+     * 目录退订（2026-09-11）：列出 file_path 位于 prefix/' 子树、且在本 App 私有目录之外
+     * （excludeBase 前缀排除，共享引用语义只退外部登记）的条目。含回收站条目。
+     * 返回 (id, thumb_path)——缩略图在本 App 私有目录内，由调用方顺带清理。
+     */
+    fun externalDirMedia(prefix: String, excludeBase: String): List<Pair<Long, String>> {
+        val sel = StringBuilder("SELECT id, thumb_path FROM media WHERE file_path LIKE ? ESCAPE '\\'")
+        val args = mutableListOf<String>(likeEscape(prefix) + "/%")
+        if (excludeBase.isNotBlank()) {
+            sel.append(" AND file_path NOT LIKE ? ESCAPE '\\'")
+            args.add(likeEscape(excludeBase) + "/%")
+        }
+        return readableDatabase.rawQuery(sel.toString(), args.toTypedArray()).use { cur ->
+            val out = mutableListOf<Pair<Long, String>>()
+            while (cur.moveToNext()) out.add(cur.getLong(0) to (cur.getString(1) ?: ""))
+            out
+        }
+    }
+
+    /** 目录退订执行：硬删该目录子树条目（文件不动，共享引用），返回解除登记条数。 */
+    fun removeExternalDirRows(prefix: String, excludeBase: String): Int {
+        val where = StringBuilder("file_path LIKE ? ESCAPE '\\'")
+        val args = mutableListOf<String>(likeEscape(prefix) + "/%")
+        if (excludeBase.isNotBlank()) {
+            where.append(" AND file_path NOT LIKE ? ESCAPE '\\'")
+            args.add(likeEscape(excludeBase) + "/%")
+        }
+        val n = readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM media WHERE $where", args.toTypedArray()).use {
+            it.moveToFirst(); it.getInt(0)
+        }
+        if (n > 0) writableDatabase.execSQL("DELETE FROM media WHERE $where", args.toTypedArray())
+        return n
+    }
+
     fun listDeleted(): List<MediaItem> =
         readableDatabase.rawQuery(
-            _MEDIA_SELECT_DELETED + " ORDER BY m.id DESC LIMIT 200", null).use { cur ->
+            "SELECT $mediaCols FROM media m JOIN posts p ON p.id=m.post_row_id JOIN authors a ON a.id=p.author_id WHERE m.deleted=1 ORDER BY m.id DESC LIMIT 200", null).use { cur ->
             val out = mutableListOf<MediaItem>()
             while (cur.moveToNext()) out.add(mediaRow(cur))
             out
         }
-
-    private val _MEDIA_SELECT_DELETED =
-        """SELECT m.id, m.post_row_id, m.media_index, m.media_type, m.file_path, m.thumb_path,
-        m.ext, m.file_size, m.width, m.height, m.source_url,
-        p.platform, p.post_id, p.post_url, p.created_at, p.text,
-        a.handle, a.name, a.avatar_url, a.profile_url, m.deleted_at, m.origin, m.downloaded_at
-        FROM media m JOIN posts p ON p.id=m.post_row_id JOIN authors a ON a.id=p.author_id
-        WHERE m.deleted=1"""
 
     fun deletedCount(): Int =
         readableDatabase.rawQuery("SELECT COUNT(*) FROM media WHERE deleted=1", null).use {
@@ -673,6 +791,10 @@ class Db(context: Context) : SQLiteOpenHelper(context, "app.db", null, 6) {
         readableDatabase.rawQuery("SELECT * FROM inbox WHERE id=?", arrayOf(id.toString())).use {
             if (it.moveToFirst()) inboxRow(it) else null
         }
+
+    /** 收件箱 URL 是否已存在（capture 查重；不受 listInbox LIMIT 300 影响）。 */
+    fun inboxUrlExists(url: String): Boolean =
+        readableDatabase.rawQuery("SELECT 1 FROM inbox WHERE url=? LIMIT 1", arrayOf(url)).use { it.moveToFirst() }
 
     fun listInbox(status: String = ""): List<InboxItem> {
         val sql = if (status.isBlank())

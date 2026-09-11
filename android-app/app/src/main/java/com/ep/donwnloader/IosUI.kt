@@ -668,7 +668,7 @@ fun GlassButton(
 
 enum class ButtonKind { Primary, Ghost }
 
-/** 玻璃输入框：无边框、圆角、主题化容器。 */
+/** 玻璃输入框：无边框、圆角、主题化容器。enabled=false 供掩码态（如 Cookie 隐藏）复用玻璃配色，不灰化突兀。 */
 @Composable
 fun GlassTextField(
     value: String,
@@ -678,12 +678,14 @@ fun GlassTextField(
     singleLine: Boolean = false,
     minLines: Int = 1,
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
+    enabled: Boolean = true,
 ) {
     val c = LocalMonet.current
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
         modifier = modifier,
+        enabled = enabled,
         placeholder = { Text(placeholder, style = MaterialTheme.typography.bodySmall) },
         textStyle = MaterialTheme.typography.bodySmall.copy(color = c.text),
         singleLine = singleLine,
@@ -700,6 +702,10 @@ fun GlassTextField(
             unfocusedTextColor = c.text,
             focusedPlaceholderColor = c.faint,
             unfocusedPlaceholderColor = c.faint,
+            disabledContainerColor = c.fill.copy(alpha = if (c.isDark) 1f else 0.72f),
+            disabledBorderColor = Color.Transparent,
+            disabledTextColor = c.text,
+            disabledPlaceholderColor = c.faint,
         ),
     )
 }

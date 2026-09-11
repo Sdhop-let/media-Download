@@ -43,10 +43,11 @@ object YtDlp {
         if (det.platform == "twitter" && det.kind == "profile" &&
             Store.prefs.twCookieHeader().isBlank()) return null
         if (det.platform == "instagram" && Store.prefs.igCookie.isBlank()) return null
+        var cookieFile: File? = null
         return try {
             ensure()
             val route = Store.proxy.currentRoute()   // null=直连；yt-dlp 支持 http/socks5
-            val cookieFile = writeCookies(det.platform)
+            cookieFile = writeCookies(det.platform)
             val playlistEnd = if (det.kind == "profile") 30 else 0
             val json = Python.getInstance().getModule("engine")
                 .callAttr("extract", det.canonical,
@@ -56,6 +57,9 @@ object YtDlp {
         } catch (e: Throwable) {
             android.util.Log.e("YtDlp", "fallback failed for $url", e)
             Plan(det.platform, det.kind, error = e.message ?: e.toString())
+        } finally {
+            // 含 auth_token/sessionid 的 Cookie 文件用完即删，避免凭据残留在 cacheDir
+            runCatching { cookieFile?.delete() }
         }
     }
 

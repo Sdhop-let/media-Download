@@ -133,7 +133,9 @@ def extract(url, cookie_file="", proxy="", playlist_end=0):
     opts = {
         "quiet": True, "no_warnings": True, "skip_download": True,
         "noprogress": True, "socket_timeout": 20, "retries": 2,
-        "nocheckcertificate": True, "extractor_retries": 1,
+        # 默认校验 TLS 证书；降级通道携带登录 Cookie，禁用校验会被中间人截获凭据，
+        # 个别域证书异常宁可提取失败也不静默降级
+        "extractor_retries": 1,
     }
     if cookie_file:
         opts["cookiefile"] = cookie_file

@@ -172,22 +172,23 @@ fun SettingsScreen() {
                                         .putExtra(CookieLoginActivity.EXTRA_PLATFORM, "twitter"))
                                 })
                             // cookieEpoch 为 key：容器登录成功返回后重读 prefs 刷新输入框
+                            // 明文默认隐藏（掩码 + 只读），点「显示」查看/编辑——防旁人窥屏
+                            var xReveal by remember { mutableStateOf(false) }
                             var twToken by remember(Store.cookieEpoch.intValue) { mutableStateOf(Store.prefs.twAuthToken) }
                             var twCt0 by remember(Store.cookieEpoch.intValue) { mutableStateOf(Store.prefs.twCt0) }
-                            GlassTextField(
-                                value = twToken,
+                            CookieFieldRow(
+                                value = twToken, reveal = xReveal, placeholder = "auth_token = 32 位十六进制",
+                                onReveal = { xReveal = !xReveal },
                                 onValueChange = { twToken = it.trim(); Store.prefs.twAuthToken = twToken },
-                                modifier = Modifier.fillMaxWidth(),
-                                placeholder = "auth_token = 32 位十六进制",
-                                singleLine = true,
                             )
-                            GlassTextField(
-                                value = twCt0,
+                            CookieFieldRow(
+                                value = twCt0, reveal = xReveal, placeholder = "ct0 = 160 位十六进制",
+                                onReveal = { xReveal = !xReveal },
                                 onValueChange = { twCt0 = it.trim(); Store.prefs.twCt0 = twCt0 },
-                                modifier = Modifier.fillMaxWidth(),
-                                placeholder = "ct0 = 160 位十六进制",
-                                singleLine = true,
                             )
+                            Text("凭据已加密存储（设备 Keystore），仅本应用可读；默认隐藏，点「显示」查看或编辑明文",
+                                fontSize = 10.sp, lineHeight = 13.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                     RowDivider()
@@ -203,20 +204,28 @@ fun SettingsScreen() {
                             Text("推荐：在 App 内嵌浏览器完成登录后自动抓取 Cookie（含 sessionid）；下方手动粘贴保留作兜底",
                                 fontSize = 10.5.sp, lineHeight = 14.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("实验性功能：非官方接口，使用 sessionid 抓取可能触发平台风控导致会话失效，请自行评估。",
+                                fontSize = 10.5.sp, lineHeight = 14.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 1.dp))
                             GlassButton(text = "浏览器登录 Instagram 并自动抓取", kind = ButtonKind.Ghost,
                                 modifier = Modifier.fillMaxWidth(),
                                 onClick = {
                                     ctx.startActivity(Intent(ctx, CookieLoginActivity::class.java)
                                         .putExtra(CookieLoginActivity.EXTRA_PLATFORM, "instagram"))
                                 })
+                            var igReveal by remember { mutableStateOf(false) }
                             var igCookie by remember(Store.cookieEpoch.intValue) { mutableStateOf(Store.prefs.igCookie) }
-                            GlassTextField(
-                                value = igCookie,
-                                onValueChange = { igCookie = it; Store.prefs.igCookie = it },
-                                modifier = Modifier.fillMaxWidth().height(84.dp),
+                            CookieFieldRow(
+                                value = igCookie, reveal = igReveal,
                                 placeholder = "sessionid=xxx; ds_user_id=xxx; …",
-                                minLines = 3,
+                                onReveal = { igReveal = !igReveal },
+                                onValueChange = { igCookie = it; Store.prefs.igCookie = it },
+                                singleLine = false, minLines = 3,
                             )
+                            Text("凭据已加密存储（设备 Keystore），仅本应用可读；默认隐藏，点「显示」查看或编辑明文",
+                                fontSize = 10.sp, lineHeight = 13.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                     RowDivider()
@@ -502,7 +511,10 @@ private fun SupportTag(text: String) {
             .padding(horizontal = 8.dp, vertical = 4.dp))
 }
 
-/** 同步其他目录子页：输入路径 → 验证可用性 → 同步登记进素材库。 */
+/** 同步进度快照：phase=hash 校验指纹 / register 登记（TaskManager.syncExternalDir 回调）。 */
+private data class SyncProgress(val phase: String, val done: Int, val total: Int, val registered: Int)
+
+/** 同步其他目录子页：输入路径 → 验证可用性 → 同步登记进素材库（可取消，2026-09-11）。 */
 @Composable
 private fun SyncExternalScreen(onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
@@ -511,6 +523,13 @@ private fun SyncExternalScreen(onBack: () -> Unit) {
     var checkedOk by remember { mutableStateOf(false) }
     var syncing by remember { mutableStateOf(false) }
     var result by remember { mutableStateOf<String?>(null) }
+    // 取消标志（IO 协程在指纹分批/逐条登记处轮询）+ 实时进度
+    val cancelFlag = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
+    var progress by remember { mutableStateOf<SyncProgress?>(null) }
+    // 目录退订（2026-09-11）：先计数预览 → 确认弹窗 → 整体解除登记（文件保留原位）
+    var removing by remember { mutableStateOf(false) }
+    var confirmRemove by remember { mutableStateOf(false) }
+    var pendingCount by remember { mutableStateOf(0) }
 
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -538,7 +557,8 @@ private fun SyncExternalScreen(onBack: () -> Unit) {
                             checked = try {
                                 val p = Store.tasks.probeExternalDir(path)
                                 checkedOk = true
-                                "可用：共 ${p.total} 个媒体（识别 Edqiu 导出 ${p.edqiu} / 普通 ${p.plain}）；共享引用，文件保留原位"
+                                (if (p.rootMirror) "Root 直读通道已打通："
+                                else "可用：") + "共 ${p.total} 个媒体（识别 Edqiu 导出 ${p.edqiu} / 普通 ${p.plain}）；共享引用，Edqiu 原件不动、零复制"
                             } catch (e: Exception) {
                                 checkedOk = false
                                 e.message ?: "目录不可用"
@@ -546,16 +566,27 @@ private fun SyncExternalScreen(onBack: () -> Unit) {
                         }
                     }, enabled = !syncing, modifier = Modifier.weight(1f))
                     GlassButton("开始同步", onClick = {
+                        cancelFlag.set(false)
                         scope.launch(Dispatchers.IO) {
                             syncing = true
+                            progress = null
                             result = try {
-                                val r = Store.tasks.syncExternalDir(path)
+                                val r = Store.tasks.syncExternalDir(path,
+                                    isCancelled = { cancelFlag.get() },
+                                    onProgress = { ph, done, tot, reg ->
+                                        progress = SyncProgress(ph, done, tot, reg)
+                                    })
                                 Store.prefs.syncDir = path
-                                "同步完成：入库 ${r.registered}（归真实作者 ${r.authorized}｜推文归并 ${r.tweetOnly}｜普通 ${r.plain}），重复跳过 ${r.skippedDup}"
+                                if (r.cancelled)
+                                    "已取消：本次已入库 ${r.registered}（重复跳过 ${r.skippedDup}），已登记部分保留，再次同步自动续传"
+                                else
+                                    "同步完成：入库 ${r.registered}（归真实作者 ${r.authorized}｜推文归并 ${r.tweetOnly}｜普通 ${r.plain}），重复跳过 ${r.skippedDup}" +
+                                        if (r.rootMirror) " · Root 直读模式" else ""
                             } catch (e: Exception) {
                                 "同步失败：${e.message}"
                             }
                             syncing = false
+                            progress = null
                         }
                     }, enabled = checkedOk && !syncing, kind = ButtonKind.Ghost,
                         modifier = Modifier.weight(1f))
@@ -564,15 +595,63 @@ private fun SyncExternalScreen(onBack: () -> Unit) {
                     Text(it, style = MaterialTheme.typography.labelSmall,
                         color = if (checkedOk) OkColor else ErrColor)
                 }
-                if (syncing) IosProgress(pct = null, modifier = Modifier.fillMaxWidth())
+                if (syncing) {
+                    IosProgress(
+                        pct = progress?.takeIf { it.total > 0 }?.let { it.done.toFloat() / it.total },
+                        modifier = Modifier.fillMaxWidth())
+                    progress?.let { p ->
+                        Text(
+                            if (p.phase == "hash") "校验指纹 ${p.done}/${p.total}"
+                            else "登记 ${p.done}/${p.total} · 已入库 ${p.registered}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    GlassButton("取消同步", onClick = { cancelFlag.set(true) },
+                        kind = ButtonKind.Ghost, modifier = Modifier.fillMaxWidth())
+                }
                 result?.let {
                     Text(it, style = MaterialTheme.typography.bodySmall,
-                        color = if (it.startsWith("同步完成")) OkColor else ErrColor)
+                        color = when {
+                            it.startsWith("同步完成") || it.startsWith("已取消") -> OkColor
+                            it.startsWith("同步失败") || it.startsWith("移除失败") -> ErrColor
+                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                        })
                 }
-                Text("说明：共享引用模式——扫描该目录（含子目录）的图片与视频登记进素材库，文件保留原位由属主 App（如 Edqiu）继续管理；Edqiu 导出的素材自动归并到真实作者与推文并带「E」角标；对方新下载后再次点同步即增量入账。从本 App 删除共享素材只解除登记，不动对方文件。",
+                // 目录退订（2026-09-11）：不再需要某目录的素材时，整体解除登记
+                GlassButton("移除该目录登记", onClick = {
+                    scope.launch(Dispatchers.IO) {
+                        removing = true
+                        pendingCount = runCatching { Store.tasks.countExternalDir(path) }.getOrDefault(0)
+                        removing = false
+                        if (pendingCount > 0) confirmRemove = true
+                        else Store.tasks.toast.value = "该目录暂无已登记素材"
+                    }
+                }, enabled = !syncing && !removing, kind = ButtonKind.Ghost,
+                    modifier = Modifier.fillMaxWidth())
+                Text("说明：共享引用模式——扫描该目录（含子目录）的图片与视频登记进素材库，文件保留原位由属主 App（如 Edqiu）继续管理；Edqiu 导出的素材自动归并到真实作者与推文并带「E」角标；对方新下载后再次点同步即增量入账。同步可随时取消，已入库部分保留；不再需要时填回原路径点「移除该目录登记」整体退订，文件保留原位。从本 App 删除共享素材只解除登记，不动对方文件。",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
+        }
+        if (confirmRemove) {
+            ConfirmDialog(
+                "移除该目录登记？",
+                "将解除登记 $pendingCount 项素材（含回收站对应条目）；文件全部保留原位，Edqiu 侧不受影响，之后可随时重新同步回来。",
+                onConfirm = {
+                    confirmRemove = false
+                    scope.launch(Dispatchers.IO) {
+                        removing = true
+                        result = try {
+                            val n = Store.tasks.removeExternalDir(path)
+                            "已解除登记 $n 项，文件保留原位（可随时重新同步）"
+                        } catch (e: Exception) {
+                            "移除失败：${e.message}"
+                        }
+                        removing = false
+                    }
+                },
+                onDismiss = { confirmRemove = false },
+                confirmText = "解除登记")
         }
     }
 }
@@ -850,4 +929,42 @@ private fun ConfirmDialog(title: String, text: String, onConfirm: () -> Unit, on
             TextButton(onClick = onDismiss) { Text("取消") }
         },
     )
+}
+
+// ---------------- Cookie 掩码行（v1.1：明文默认隐藏，防旁人窥屏；存储层另经 Keystore 加密） ----------------
+
+/** 隐藏态掩码：固定 12 点，不泄露真实长度；仅真实值为空时显示占位。 */
+private const val COOKIE_MASK = "••••••••••••"
+
+/** Cookie 输入行：输入框 + 「显示/隐藏」按钮。隐藏态掩码只读（enabled=false，不触发 onValueChange），明文永不被掩码污染。 */
+@Composable
+private fun CookieFieldRow(
+    value: String,
+    reveal: Boolean,
+    placeholder: String,
+    onReveal: () -> Unit,
+    onValueChange: (String) -> Unit,
+    singleLine: Boolean = true,
+    minLines: Int = 1,
+) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        GlassTextField(
+            value = if (reveal || value.isBlank()) value else COOKIE_MASK,
+            onValueChange = onValueChange,
+            modifier = Modifier.weight(1f),
+            placeholder = placeholder,
+            singleLine = singleLine,
+            minLines = minLines,
+            enabled = reveal,
+        )
+        Text(
+            text = if (reveal) "隐藏" else "显示",
+            fontSize = 11.sp, fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier
+                .clip(RoundedCornerShape(10.dp))
+                .clickable { onReveal() }
+                .padding(horizontal = 10.dp, vertical = 8.dp)
+        )
+    }
 }

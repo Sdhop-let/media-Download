@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -105,27 +106,41 @@ private fun parseIsoLocalDate(iso: String): LocalDate? {
     }.getOrNull()
 }
 
-/** 平铺媒体（已按下载时间倒序）→ 按各条 downloaded_at 的本地日期分组（缺失用发帖时间兜底）。
- *  输出保持输入的倒序；LinkedHashMap 保序。 */
-private fun groupByDownloadDay(rows: List<MediaItem>): List<DayGroup> {
+/** 平铺媒体（已按 sortBase 倒序、同帖连续）→ 帖子归并 → 日期分组。
+ *  sortBase="downloaded"（2026-09-10 用户定型）：帖子归属日期 = 组内 MAX(downloaded_at)，
+ *  缺失用发帖时间兜底——整帖同组不拆散，老帖重下载时整帖浮到最新日期组；
+ *  sortBase="posted"（2026-09-11 新增，修正"老帖挤新日期组"）：按发帖时间归组，
+ *  时间线即推文时间线，2024 年的老帖沉回 2024，不再霸占最近日期。
+ *  组间按日期倒序硬排序，杜绝"9月6日插到昨天前面"的乱序（旧版按出现顺序建组的 bug）。 */
+private fun groupByDownloadDay(rows: List<MediaItem>, sortBase: String = "downloaded"): List<DayGroup> {
     val today = LocalDate.now()
-    val dayMap = LinkedHashMap<String, MutableList<MediaItem>>()
-    rows.forEach { m ->
-        val d = parseIsoLocalDate(m.downloadedAt) ?: parseIsoLocalDate(m.postTime) ?: today
-        dayMap.getOrPut(d.toString()) { mutableListOf() }.add(m)
+    val postMap = LinkedHashMap<Long, MutableList<MediaItem>>()
+    rows.forEach { m -> postMap.getOrPut(m.postRowId) { mutableListOf() }.add(m) }
+    val dayMap = HashMap<String, MutableList<MediaItem>>()
+    postMap.values.forEach { items ->
+        val d: LocalDate = if (sortBase == "posted") {
+            parseIsoLocalDate(items.first().postTime) ?: today
+        } else {
+            items.maxOfOrNull { m ->
+                parseIsoLocalDate(m.downloadedAt) ?: parseIsoLocalDate(m.postTime) ?: today
+            } ?: today
+        }
+        dayMap.getOrPut(d.toString()) { mutableListOf() }.addAll(items)
     }
     val f = DateTimeFormatter.ofPattern("M月d日")
     val fY = DateTimeFormatter.ofPattern("yyyy年M月d日")
-    return dayMap.entries.map { (key, items) ->
-        val d = LocalDate.parse(key)
-        val label = when {
-            d == today -> "今天"
-            d == today.minusDays(1) -> "昨天"
-            d.year == today.year -> d.format(f)
-            else -> d.format(fY)
+    return dayMap.entries
+        .sortedByDescending { it.key }   // ISO yyyy-MM-dd 字符序 = 日期倒序
+        .map { (key, items) ->
+            val d = LocalDate.parse(key)
+            val label = when {
+                d == today -> "今天"
+                d == today.minusDays(1) -> "昨天"
+                d.year == today.year -> d.format(f)
+                else -> d.format(fY)
+            }
+            DayGroup(key, label, items)
         }
-        DayGroup(key, label, items)
-    }
 }
 
 @Composable
@@ -133,6 +148,7 @@ fun LibraryScreen() {
     // 两级筛选：一级分类入口（来源/分组/类型，点击过渡展开二级选项）；二级为具体选项。
     var openSection by remember { mutableStateOf<String?>(null) }   // null|"origin"|"group"|"type"
     var group by remember { mutableStateOf("time") }                // 分组方式：time=按下载日期 / author=按作者
+    var sortBase by remember { mutableStateOf("downloaded") }       // 时间视图排序基准：downloaded=下载时间 / posted=发帖时间
     var origin by remember { mutableStateOf("") }                   // ''=全部来源；'edqiu'=Edqiu 同步导入
     var platform by remember { mutableStateOf("") }
     var type by remember { mutableStateOf("") }
@@ -144,6 +160,10 @@ fun LibraryScreen() {
     var expandedAuthorId by remember { mutableStateOf<Long?>(null) }
     var authorMedia by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
     var stats by remember { mutableStateOf(Stats(0, 0, 0, emptyMap())) }
+    // 作者统计（2026-09-11 新增）：当前筛选下的作者排行数据 + 弹层开关 + 跨分组跳转待展开作者
+    var authorStatRows by remember { mutableStateOf<List<AuthorStatRow>>(emptyList()) }
+    var showAuthorStats by remember { mutableStateOf(false) }
+    var pendingAuthorJump by remember { mutableStateOf<Long?>(null) }
     var selected by remember { mutableStateOf<MediaItem?>(null) }
     var feed by remember { mutableStateOf<Pair<List<MediaItem>, Int>?>(null) }  // 竖滑视频流：列表 + 起始下标
     var previewing by remember { mutableStateOf<MediaItem?>(null) }
@@ -161,24 +181,32 @@ fun LibraryScreen() {
     // mediaVersion：媒体入库/恢复/登记时自增（Store），素材库观察到变化立即重查，下载完成无需切页。
     // 筛选条件变化时重置手风琴（默认展开最新一组/收起作者）并置 loading 触发内容区过渡动画；
     // mediaVersion/reload 触发的重查静默刷新（不置 loading，避免下载完成时全屏闪动画）。
-    LaunchedEffect(group, platform, type, origin, reload, Store.mediaVersion) {
-        val fk = "$group|$platform|$type|$origin"
+    LaunchedEffect(group, platform, type, origin, sortBase, reload, Store.mediaVersion) {
+        val fk = "$group|$platform|$type|$origin|$sortBase"
         val filterChanged = fk != lastFilterKey
         lastFilterKey = fk
         if (filterChanged) loading = true
         withContext(Dispatchers.IO) {
             if (group == "time") {
-                mediaItems = Store.db.listMediaTime(platform, type, "", null, 0, 600, origin = origin)
-                dayGroups = groupByDownloadDay(mediaItems)
+                // 2000 条上限（root 直读后 Edqiu 225+ 全量在库；作者列表同理放大到全量）
+                mediaItems = Store.db.listMediaTime(platform, type, "", null, 0, 2000,
+                    origin = origin, sortBase = sortBase)
+                dayGroups = groupByDownloadDay(mediaItems, sortBase)
             } else {
-                authors = Store.db.listAuthors(platform, "", 0, 30, perAuthor = 0, origin = origin)
+                // 旧版 limit=30 只显示前 30 位作者（用户 90+ 位作者只见 20 多的根因），放大为全量
+                authors = Store.db.listAuthors(platform, "", 0, 1000, perAuthor = 0, origin = origin)
             }
             stats = Store.db.stats()
+            // 作者统计排行（跟随平台/类型/来源筛选；与 stats 同步刷新，弹层打开即有数据）
+            authorStatRows = Store.db.authorStats(platform, type, origin)
         }
         if (filterChanged) {
             expandedDays.clear()
             expandedAuthorId = null
             if (group == "time") dayGroups.firstOrNull()?.let { expandedDays.add(it.key) }
+            // 作者统计弹层「查看素材」跨分组跳转：分组切换重置后恢复待展开的作者
+            pendingAuthorJump?.let { expandedAuthorId = it }
+            pendingAuthorJump = null
         }
         loading = false
     }
@@ -217,6 +245,9 @@ fun LibraryScreen() {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     StatCell("图片", stats.byType["photo"] ?: 0, Modifier.weight(1f))
                     StatCell("视频", stats.byType["video"] ?: 0, Modifier.weight(1f))
+                    // 作者格可点（2026-09-11）：弹出「作者统计」排行弹层（跟随当前筛选）
+                    StatCell("作者", authorStatRows.size, Modifier.weight(1f),
+                        onClick = { showAuthorStats = true })
                 }
             }
         }
@@ -273,13 +304,27 @@ fun LibraryScreen() {
                         loading = true; openSection = null
                     }
                 }
-                "group" -> Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    FilterChip("时间", group == "time") {
-                        group = "time"; loading = true; openSection = null
+                "group" -> Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        FilterChip("时间", group == "time") {
+                            group = "time"; loading = true; openSection = null
+                        }
+                        FilterChip("作者", group == "author") {
+                            group = "author"; loading = true; openSection = null
+                        }
                     }
-                    FilterChip("作者", group == "author") {
-                        group = "author"; loading = true; openSection = null
+                    // 时间视图排序基准（2026-09-11 用户拍板增加）：按下载=最近拿到的一批聚最新组；
+                    // 按发帖=推文时间线，老帖沉回原发帖日期，不再挤占最近日期组
+                    if (group == "time") {
+                        Row(Modifier.padding(top = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            FilterChip("按下载时间", sortBase == "downloaded") {
+                                sortBase = "downloaded"; loading = true
+                            }
+                            FilterChip("按发帖时间", sortBase == "posted") {
+                                sortBase = "posted"; loading = true
+                            }
+                        }
                     }
                 }
                 "type" -> Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
@@ -380,6 +425,26 @@ fun LibraryScreen() {
         }
     }
 
+    // 作者统计弹层：副标题标注当前生效的筛选，行点击跳转到作者分组视图并展开该作者
+    if (showAuthorStats) {
+        val filterLabel = listOfNotNull(
+            if (origin == "edqiu") "Edqiu" else when (platform) {
+                "twitter" -> "X"; "instagram" -> "IG"; "bluesky" -> "Bluesky"; else -> null
+            },
+            when (type) { "photo" -> "图片"; "video" -> "视频"; else -> null },
+        ).joinToString(" · ")
+        AuthorStatsSheet(
+            rows = authorStatRows,
+            filterLabel = filterLabel,
+            onDismiss = { showAuthorStats = false },
+            onOpenAuthor = { id ->
+                showAuthorStats = false
+                if (group == "author") expandedAuthorId = id
+                else { group = "author"; pendingAuthorJump = id }
+            },
+        )
+    }
+
     selected?.let { m ->
         MediaSheet(m,
             onDismiss = { selected = null },
@@ -411,14 +476,27 @@ fun LibraryScreen() {
     }
 }
 
-/** 分享媒体文件（FileProvider 授权给任意 App）。 */
+/** 分享媒体文件（FileProvider 授权给任意 App）。外部共享路径先异步物化到本 App cache
+ *  （root 通道 su cat 单文件），落盘后才拉起系统分享；自有路径直接可用零等待。 */
 fun shareMedia(m: MediaItem) {
     val ctx = Store.appContext
-    val f = File(m.filePath)
-    if (!f.exists()) {
-        Store.tasks.toast.value = "文件不存在：${f.name}"
+    val local = File(m.filePath)
+    if (local.isFile) {
+        doShare(ctx, local, m)
         return
     }
+    Store.tasks.toast.value = "正在准备文件…"
+    Store.scope.launch(Dispatchers.IO) {
+        val f = ContentAccess.local(m.filePath)
+        if (f == null) {
+            Store.tasks.toast.value = "文件不可用（Root 通道读取失败）：${local.name}"
+        } else {
+            kotlinx.coroutines.withContext(Dispatchers.Main) { doShare(ctx, f, m) }
+        }
+    }
+}
+
+private fun doShare(ctx: android.content.Context, f: File, m: MediaItem) {
     runCatching {
         val uri = androidx.core.content.FileProvider.getUriForFile(
             ctx, "${ctx.packageName}.fileprovider", f)
@@ -445,9 +523,17 @@ fun copyLink(m: MediaItem) {
     }
 }
 
-/** 全屏图片预览（黑底 + 点击任意处关闭）。 */
+/** 全屏图片预览（黑底 + 点击任意处关闭）。外部共享路径先按需物化（root 通道，秒级）。 */
 @Composable
 fun ImageViewerDialog(path: String, onDismiss: () -> Unit) {
+    // 自有路径 local() 直接返回原 File；外部路径物化到 ro_share 后展示
+    var resolved by remember(path) { mutableStateOf(File(path).takeIf { it.isFile }) }
+    LaunchedEffect(path) {
+        if (resolved == null) {
+            val f = withContext(Dispatchers.IO) { ContentAccess.local(path) }
+            if (f != null) resolved = f
+        }
+    }
     androidx.compose.ui.window.Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
@@ -456,13 +542,18 @@ fun ImageViewerDialog(path: String, onDismiss: () -> Unit) {
             Modifier.fillMaxSize().background(Color.Black).clickable { onDismiss() },
             contentAlignment = Alignment.Center,
         ) {
-            AsyncImage(
-                model = ImageRequest.Builder(LocalContext.current).data(File(path)).build(),
-                contentDescription = null,
-                contentScale = ContentScale.Fit,
-                imageLoader = Store.imageLoader,
-                modifier = Modifier.fillMaxSize(),
-            )
+            val f = resolved
+            if (f == null) {
+                Text("读取中…", color = Color.White.copy(alpha = 0.75f), fontSize = 14.sp)
+            } else {
+                AsyncImage(
+                    model = ImageRequest.Builder(LocalContext.current).data(f).build(),
+                    contentDescription = null,
+                    contentScale = ContentScale.Fit,
+                    imageLoader = Store.imageLoader,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
         }
     }
 }
@@ -492,13 +583,16 @@ private fun SkeletonList() {
     }
 }
 
-/** 统计块单元格：数字 + 标签居中。 */
+/** 统计块单元格：数字 + 标签居中；onClick 非空时可点（标签带 ▸ 提示，如「作者统计」入口格）。 */
 @Composable
-private fun StatCell(label: String, count: Int, modifier: Modifier = Modifier) {
+private fun StatCell(label: String, count: Int, modifier: Modifier = Modifier,
+                     onClick: (() -> Unit)? = null) {
     val c = ios()
-    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+    Column(modifier.then(if (onClick != null) Modifier.clickable { onClick() } else Modifier),
+        horizontalAlignment = Alignment.CenterHorizontally) {
         Text("$count", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = c.text)
-        Text(label, fontSize = 10.5.sp, color = c.faint)
+        Text(if (onClick != null) "$label ▸" else label,
+            fontSize = 10.5.sp, color = c.faint)
     }
 }
 
@@ -718,11 +812,26 @@ private fun EmptyHint(filtered: Boolean) {
     }
 }
 
-/** 解析媒体封面：图片直接取原图；视频取缩略图，缺失/失效时在后台补抽帧并回写数据库。 */
+/** 解析媒体封面：图片直接取原图；视频取缩略图，缺失/失效时在后台补抽帧并回写数据库。
+ *  外部共享路径（root 直读登记的原路径）：图片走 su 流降采样缩略图（.thumbs_ext 持久位），
+ *  网格不物化原图；视频由 VideoThumbs.ensure 按需单文件物化后抽帧。 */
 @Composable
 private fun rememberVideoCover(m: MediaItem): File? {
     if (m.mediaType != "video") {
-        return remember(m.filePath) { File(m.filePath).takeIf { it.isFile } }
+        if (File(m.filePath).isFile) {
+            return remember(m.filePath) { File(m.filePath) }
+        }
+        if (!ContentAccess.isForeign(m.filePath)) return null
+        // 外部图片：先查持久缩略图，没有则 su 流生成（IO 线程）
+        val cached = remember(m.filePath) { ContentAccess.thumbOutFile(m.filePath)?.takeIf { it.isFile && it.length() > 0L } }
+        val state = remember(m.filePath) { mutableStateOf(cached) }
+        LaunchedEffect(m.filePath) {
+            if (state.value == null) {
+                val t = withContext(Dispatchers.IO) { ContentAccess.imageThumb(m.filePath) }
+                if (t != null) state.value = t
+            }
+        }
+        return state.value
     }
     val state = remember(m.id, m.filePath, m.thumbPath) {
         mutableStateOf(VideoThumbs.resolve(m))
@@ -880,6 +989,113 @@ private fun MediaSheet(
                 GlassButton("删除", onClick = onDeleted,
                     kind = ButtonKind.Ghost, modifier = Modifier.weight(1f))
             }
+        }
+    }
+}
+
+/** 作者统计弹层（2026-09-11 新增）：当前筛选下按素材数排行的作者榜。
+ *  汇总行 = 作者数/素材总数/总容量（+当前筛选）；每行 = 头像 + 名字 + 图/视拆分 +
+ *  素材数/容量 + 主色占比条（以榜首为基准），点行跳到作者分组视图并展开该作者。 */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AuthorStatsSheet(
+    rows: List<AuthorStatRow>,
+    filterLabel: String,
+    onDismiss: () -> Unit,
+    onOpenAuthor: (Long) -> Unit,
+) {
+    val c = LocalMonet.current
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val totalItems = rows.sumOf { it.mediaCount }
+    val totalBytes = rows.sumOf { it.bytes }
+    val maxCnt = rows.maxOfOrNull { it.mediaCount } ?: 0
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = if (c.isDark) Color(0xF20E1830) else Color(0xF7F4F8FE),
+        contentColor = c.text,
+        scrimColor = Color(0x66000000),
+        dragHandle = {
+            Box(Modifier.padding(top = 10.dp).size(40.dp, 4.dp)
+                .background(if (c.isDark) Color(0xFF3A4A6E) else Color(0xFFC3CDE2), RoundedCornerShape(2.dp)))
+        },
+    ) {
+        Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, bottom = 24.dp)) {
+            Text("作者统计", style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold, color = c.text)
+            Text(
+                "${rows.size} 位作者 · $totalItems 项素材 · ${fmtBytes(totalBytes)}" +
+                    if (filterLabel.isNotBlank()) " · $filterLabel" else "",
+                style = MaterialTheme.typography.labelSmall, color = c.faint,
+                modifier = Modifier.padding(top = 2.dp))
+            if (rows.isEmpty()) {
+                Text("当前筛选下还没有作者素材",
+                    style = MaterialTheme.typography.bodySmall, color = c.faint,
+                    modifier = Modifier.padding(top = 18.dp, bottom = 10.dp))
+            } else {
+                LazyColumn(
+                    Modifier.fillMaxWidth().padding(top = 10.dp).heightIn(max = 430.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    items(rows, key = { it.id }) { r ->
+                        AuthorStatRowItem(r, maxCnt, onClick = { onOpenAuthor(r.id) })
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 作者统计排行行：头像 + 名字/@handle·图视拆分 + 素材数/容量，下方主色占比条（榜首=满格）。 */
+@Composable
+private fun AuthorStatRowItem(r: AuthorStatRow, maxCount: Int, onClick: () -> Unit) {
+    val c = LocalMonet.current
+    Column(Modifier.fillMaxWidth()
+        .clip(RoundedCornerShape(10.dp))
+        .clickable(onClick = onClick)
+        .padding(horizontal = 2.dp, vertical = 6.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(34.dp).clip(CircleShape)
+                .background(MaterialTheme.colorScheme.surfaceVariant)) {
+                if (r.avatarUrl.isNotBlank()) AsyncImage(
+                    model = r.avatarUrl, contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    imageLoader = Store.imageLoader,
+                    modifier = Modifier.fillMaxSize())
+                else Text(r.handle.take(1).uppercase().ifBlank { "?" },
+                    modifier = Modifier.align(Alignment.Center),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 13.sp)
+            }
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(r.name.ifBlank { r.handle },
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold, maxLines = 1,
+                    overflow = TextOverflow.Ellipsis)
+                val split = buildString {
+                    append("@").append(r.handle)
+                    if (r.photoCount > 0) append(" · 图 ").append(r.photoCount)
+                    if (r.videoCount > 0) append(" · 视 ").append(r.videoCount)
+                    if (r.postCount > 0) append(" · ").append(r.postCount).append(" 帖")
+                }
+                Text(split, style = MaterialTheme.typography.labelSmall,
+                    color = c.faint, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            Column(horizontalAlignment = Alignment.End) {
+                Text("${r.mediaCount} 项", fontSize = 12.5.sp,
+                    fontWeight = FontWeight.Bold, color = c.text)
+                Text(fmtBytes(r.bytes), fontSize = 10.sp, color = c.faint)
+            }
+        }
+        Spacer(Modifier.height(5.dp))
+        Box(Modifier.fillMaxWidth().height(4.dp)
+            .clip(RoundedCornerShape(2.dp))
+            .background(c.line.copy(alpha = 0.45f))) {
+            val frac = if (maxCount <= 0) 0f else
+                (r.mediaCount.toFloat() / maxCount).coerceIn(0.04f, 1f)
+            Box(Modifier.fillMaxWidth(frac).fillMaxHeight()
+                .background(c.accent.copy(alpha = 0.75f)))
         }
     }
 }

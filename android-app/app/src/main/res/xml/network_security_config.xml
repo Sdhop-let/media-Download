@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 默认禁明文：接口与测速源全 https。
+     仅媒体 CDN 放行——yt-dlp 可提取到 http 变体直链，
+     域名覆盖 X(pbs/video.twimg.com)、IG(scontent.cdninstagram.com / *.fbcdn.net)。 -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">twimg.com</domain>
+        <domain includeSubdomains="true">cdninstagram.com</domain>
+        <domain includeSubdomains="true">fbcdn.net</domain>
+    </domain-config>
+</network-security-config>

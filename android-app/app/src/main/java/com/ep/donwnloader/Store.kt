@@ -2,14 +2,18 @@ package com.ep.donwnloader
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
-import org.json.JSONObject
 import okhttp3.OkHttpClient
+import okio.Buffer
+import org.json.JSONObject
 import java.net.InetSocketAddress
 import java.net.Proxy
 import java.util.Locale
@@ -80,6 +84,11 @@ object Store {
         tasks = TaskManager()
         tasks.start()
         proxy.start()
+        // mirror 退役迁移（root 直读改造：镜像路径条目改指原路径）+ 物化缓存清理
+        scope.launch(Dispatchers.IO) {
+            runCatching { tasks.migrateMirrorPaths() }
+            runCatching { ContentAccess.sweep() }
+        }
         OptimizeWorker.schedule(appContext)
         // 远程图片（头像等）也走当前优选路由；磁盘缓存让重启后头像/封面免网络秒出
         imageLoader = coil.ImageLoader.Builder(appContext)
@@ -110,6 +119,26 @@ object Store {
 class Prefs(ctx: Context) {
     private val sp: SharedPreferences = ctx.getSharedPreferences("settings", Context.MODE_PRIVATE)
 
+    /** 加密存储：敏感凭据（登录态/Cookie/Clash 配置）写入 Keystore 主密钥保护的
+     *  EncryptedSharedPreferences。该库已标记 @Deprecated，但功能正确，加抑制。 */
+    @Suppress("DEPRECATION")
+    private val secure: SharedPreferences = try {
+        val masterKey = MasterKey.Builder(ctx)
+            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+            .build()
+        EncryptedSharedPreferences.create(
+            ctx,
+            "settings_secure",
+            masterKey,
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+        )
+    } catch (t: Throwable) {
+        // 密钥库/加密不可用时降级为独立明文文件，至少与旧 sp 隔离
+        Log.w("Prefs", "EncryptedSharedPreferences 初始化失败，降级明文存储", t)
+        ctx.getSharedPreferences("settings_secure_fb", Context.MODE_PRIVATE)
+    }
+
     var proxyMode: String
         get() = sp.getString("proxy_mode", "auto") ?: "auto"
         set(v) = sp.edit().putString("proxy_mode", v).apply()
@@ -122,18 +151,21 @@ class Prefs(ctx: Context) {
         get() = sp.getBoolean("auto_optimize", true)
         set(v) = sp.edit().putBoolean("auto_optimize", v).apply()
 
+    /** 后台全量测速周期（分钟）。审计 P0：默认配置后台流量过大，由 10 分钟放宽到 30 分钟。 */
     var intervalMin: Int
-        get() = sp.getInt("interval_min", 10)
+        get() = sp.getInt("interval_min", 30)
         set(v) = sp.edit().putInt("interval_min", v.coerceIn(1, 120)).apply()
 
     var maxBskyPosts: Int
         get() = sp.getInt("max_bsky_posts", 60)
         set(v) = sp.edit().putInt("max_bsky_posts", v.coerceIn(10, 200)).apply()
 
-    /** Instagram 会话 Cookie（至少含 sessionid=...），供移动 API 提取使用 */
+    /** Instagram 会话 Cookie（至少含 sessionid=...），供移动 API 提取使用。
+     *  内存缓存 + 加密存储双层；敏感凭据不落旧明文 sp。 */
+    private var _igCookie: String = secure.getString("ig_cookie", "") ?: ""
     var igCookie: String
-        get() = sp.getString("ig_cookie", "") ?: ""
-        set(v) = sp.edit().putString("ig_cookie", v).apply()
+        get() = _igCookie
+        set(v) { _igCookie = v; secure.edit().putString("ig_cookie", v).apply() }
 
     /** 系统分享后自动开始下载（关闭则仅捕获进收件箱） */
     var shareAutoDownload: Boolean
@@ -150,19 +182,45 @@ class Prefs(ctx: Context) {
         get() = sp.getString("sync_dir", "") ?: ""
         set(v) = sp.edit().putString("sync_dir", v).apply()
 
-    /** Clash 配置导入原文（http/socks5 节点参与候选，随每次检测重建） */
+    /** Clash 配置导入原文（http/socks5 节点参与候选，随每次检测重建）。
+     *  内存缓存 + 加密存储双层；敏感凭据不落旧明文 sp。 */
+    private var _clashImport: String = secure.getString("clash_import", "") ?: ""
     var clashImport: String
-        get() = sp.getString("clash_import", "") ?: ""
-        set(v) = sp.edit().putString("clash_import", v).apply()
+        get() = _clashImport
+        set(v) { _clashImport = v; secure.edit().putString("clash_import", v).apply() }
 
-    /** X / Twitter 登录 Cookie 双值：受限内容与主页解析用 */
+    /** X / Twitter 登录 Cookie 双值：受限内容与主页解析用。
+     *  内存缓存 + 加密存储双层；敏感凭据不落旧明文 sp。 */
+    private var _twAuthToken: String = secure.getString("tw_auth_token", "") ?: ""
     var twAuthToken: String
-        get() = sp.getString("tw_auth_token", "") ?: ""
-        set(v) = sp.edit().putString("tw_auth_token", v).apply()
+        get() = _twAuthToken
+        set(v) { _twAuthToken = v; secure.edit().putString("tw_auth_token", v).apply() }
 
+    private var _twCt0: String = secure.getString("tw_ct0", "") ?: ""
     var twCt0: String
-        get() = sp.getString("tw_ct0", "") ?: ""
-        set(v) = sp.edit().putString("tw_ct0", v).apply()
+        get() = _twCt0
+        set(v) { _twCt0 = v; secure.edit().putString("tw_ct0", v).apply() }
+
+    /** 一次性迁移：旧明文 sp 中的敏感凭据迁到加密 secure。
+     *  若旧 sp 非空且 secure 为空则写入 secure 并更新内存缓存；
+     *  无论是否迁移，都从旧 sp 删除这四个键，确保 secure 为唯一权威存储。 */
+    init {
+        val keys = listOf("tw_auth_token", "tw_ct0", "ig_cookie", "clash_import")
+        for (k in keys) {
+            val plain = sp.getString(k, "") ?: ""
+            if (plain.isNotBlank() && secure.getString(k, "").isNullOrBlank()) {
+                secure.edit().putString(k, plain).apply()
+                when (k) {
+                    "tw_auth_token" -> _twAuthToken = plain
+                    "tw_ct0" -> _twCt0 = plain
+                    "ig_cookie" -> _igCookie = plain
+                    "clash_import" -> _clashImport = plain
+                }
+            }
+            // 无论迁移与否，旧明文凭据一律清除
+            sp.edit().remove(k).apply()
+        }
+    }
 
     /** Material You 动态取色（Android 12+） */
     var dynamicColor: Boolean
@@ -194,13 +252,29 @@ class Prefs(ctx: Context) {
 class Http(val route: String?) {
     val client: OkHttpClient = Net.client(route)
 
+    /** 流式读取响应体并限制上限（默认调用方给 32MB）；超限抛 ExtractError，
+     *  防止无界 body.string() 吃爆内存。 */
+    private fun readLimited(body: okhttp3.ResponseBody, maxBytes: Long): String {
+        val src = body.source()
+        val out = okio.Buffer()
+        var total = 0L
+        while (true) {
+            val n = src.read(out, 8192L)
+            if (n == -1L) break
+            total += n
+            if (total > maxBytes) throw ExtractError("响应体超过上限")
+        }
+        return out.readUtf8()
+    }
+
     fun getJson(url: String, headers: Map<String, String> = emptyMap()): JSONObject {
         val b = okhttp3.Request.Builder().url(url).header("User-Agent", UA).get()
         headers.forEach { (k, v) -> b.header(k, v) }
         client.newCall(b.build()).execute().use { resp ->
-            val body = resp.body?.string() ?: ""
+            val body = resp.body ?: throw ExtractError("HTTP ${resp.code}: 空响应")
+            val text = readLimited(body, 32L * 1024 * 1024)
             if (!resp.isSuccessful) throw ExtractError("HTTP ${resp.code}")
-            return JSONObject(body)
+            return JSONObject(text)
         }
     }
 
@@ -208,8 +282,10 @@ class Http(val route: String?) {
         val b = okhttp3.Request.Builder().url(url).header("User-Agent", UA).get()
         headers.forEach { (k, v) -> b.header(k, v) }
         client.newCall(b.build()).execute().use { resp ->
+            val body = resp.body ?: return ""
+            val text = readLimited(body, 32L * 1024 * 1024)
             if (!resp.isSuccessful) throw ExtractError("HTTP ${resp.code}")
-            return resp.body?.string() ?: ""
+            return text
         }
     }
 

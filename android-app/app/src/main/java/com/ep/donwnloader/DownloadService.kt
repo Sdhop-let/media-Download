@@ -18,6 +18,7 @@ import kotlinx.coroutines.launch
 /** 下载前台服务：App 退到后台/被划走时保活下载，并在通知栏显示聚合进度。 */
 class DownloadService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val started = java.util.concurrent.atomic.AtomicBoolean(false)
     private var lastUpdate = 0L
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -29,7 +30,8 @@ class DownloadService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForeground(NOTIF_ID, buildNotif("下载服务运行中", "准备中…"))
+        startForeground(NOTIF_ID, buildNotif("下载服务运行中", "准备中…", 0, 0))
+        if (started.compareAndSet(false, true)) {
         scope.launch {
             Store.tasks.tasks.collectLatest { tasks ->
                 val active = tasks.filter { it.status == "queued" || it.status == "running" }
@@ -44,20 +46,21 @@ class DownloadService : Service() {
                 val total = active.sumOf { it.totalFiles }.coerceAtLeast(1)
                 val bytes = fmtBytes(active.sumOf { it.bytes })
                 NotificationManagerCompat.from(this@DownloadService)
-                    .notify(NOTIF_ID, buildNotif("正在下载 ${active.size} 个任务", "$done/$total 个文件 · $bytes"))
+                    .notify(NOTIF_ID, buildNotif("正在下载 ${active.size} 个任务", "$done/$total 个文件 · $bytes", done, total))
             }
+        }
         }
         return START_NOT_STICKY
     }
 
-    private fun buildNotif(title: String, text: String): Notification =
+    private fun buildNotif(title: String, text: String, done: Int = 0, total: Int = 0): Notification =
         NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_download)
             .setContentTitle(title)
             .setContentText(text)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
-            .setProgress(100, 0, true)
+            .setProgress(100, if (total > 0) (done * 100 / total).coerceIn(0, 100) else 0, total <= 0)
             .build()
 
     override fun onDestroy() {
