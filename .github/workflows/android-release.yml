@@ -24,9 +24,12 @@ jobs:
           cache: gradle
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
         with:
-          packages: "platforms;android-36 build-tools;36.0.0"
+          packages: ""
+
+      - name: Install Android SDK platform
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
 
       - name: Set up Python 3.12 for Chaquopy
         id: setup-python
