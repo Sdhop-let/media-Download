@@ -9,7 +9,8 @@ Kotlin 2.0 · Jetpack Compose · 内嵌 yt-dlp · 代理自动优选 · 系统�
 [![Platform](https://img.shields.io/badge/platform-Android%208.0%2B-3DDC84)](#)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.0.21-7F52FF)](#)
 [![Compose](https://img.shields.io/badge/Compose-BOM%202024.12-4285F4)](#)
-[![Release](https://img.shields.io/badge/release-v1.1-E9573F)](#)
+[![Release](https://img.shields.io/badge/release-v1.2.0-E9573F)](https://github.com/Sdhop-let/media-Download/releases/tag/v1.2.0)
+[![Android APK](https://github.com/Sdhop-let/media-Download/actions/workflows/android-release.yml/badge.svg)](https://github.com/Sdhop-let/media-Download/actions/workflows/android-release.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
 </div>
@@ -49,16 +50,18 @@ Kotlin 2.0 · Jetpack Compose · 内嵌 yt-dlp · 代理自动优选 · 系统�
 - **🐍 内嵌 yt-dlp 引擎**：Chaquopy 内嵌 Python 3.12 + yt-dlp（1083 模块），原生提取失败自动降级重试，Cookie 自动喂入
 - **🍪 浏览器容器登录**：内置 WebView 登录 X / Instagram，自动抓取 Cookie（含 HttpOnly），替代手动 DevTools 抠 Cookie
 - **🔄 本地导入 / 共享目录**：扫描下载目录重登记；「同步其他目录」以共享引用模式接入任意文件夹（如 Edqiu 下载目录）——文件留原位、仅登记元数据，文件名 / sidecar 自动识别归并，导入时间按文件真实落盘时刻沉位，绝不霸占时间线顶部
+- **🖼 全屏同类媒体查看器**：素材库点击即打开全屏查看页，上下滑动只浏览图片或只浏览视频；视频双击暂停，长按 5 秒查看详细操作
+- **🔔 GitHub 版本更新检测**：设置 → 关于 → 检查更新，显示 Release 更新说明并提供 APK 下载；推送 `v*` tag 自动构建 APK 并发布 GitHub Release
 
 ---
 
 ## 🏗 项目架构
 
-项目包含两端：**Android App（主力，功能完整）** 与 **PC 桌面版（前身，功能已被覆盖大半）**。
+本项目为 **Android 原生应用**，单端实现。
 
 ```
 媒体下载器/
-├── android-app/          # Android 主力端（本 Release 发布对象）
+├── android-app/          # Android 端（本 Release 发布对象）
 │   └── app/src/main/java/...
 │       ├── MainActivity.kt      # 单 Activity 入口：SEND 分享 / 剪贴板捕获
 │       ├── Store.kt             # 全局单例：DB / Prefs / 代理 / 任务 / 图片加载器
@@ -76,9 +79,7 @@ Kotlin 2.0 · Jetpack Compose · 内嵌 yt-dlp · 代理自动优选 · 系统�
 │       ├── Db.kt                # SQLite v5：authors/posts/media/tasks/proxy/inbox
 │       └── Background.kt        # 前台下载服务 + WorkManager 周期优选
 │   └── app/src/main/python/     # yt-dlp 纯源码直放（engine.py 提取引擎）
-├── backend/              # PC 桌面版（Python 3.14 + FastAPI:8765 + SQLite WAL + gallery-dl）
-├── run_server.py         # PC 版启动器
-└── docs/                 # 开发文档（HANDOFF / TASKS / UI_DESIGN / RESEARCH）
+└── docs/                 # 开发文档（HANDOFF / TASKS / UI_DESIGN / ICON_DESIGN / AUDIT）
 ```
 
 ### 核心数据流
@@ -105,7 +106,6 @@ Kotlin 2.0 · Jetpack Compose · 内嵌 yt-dlp · 代理自动优选 · 系统�
 
 | 阶段 | 内容 |
 |---|---|
-| **M0–M5**（PC 版） | 项目初始化 → 代理模块 → 下载模块（gallery-dl）→ 素材库 → 原生 HTML/CSS/JS + Vue3 前端（vendored 无构建）→ 联调交付 |
 | **M6** | Android 端立项：Kotlin + Jetpack Compose 单 Activity 架构，基础下载链路 |
 | **M7**（09-05） | 主力端强化：素材库双视图、回收站、批量操作、全屏查看 / 播放 |
 | **M8**（09-05） | 对标同类产品强化：收件箱预览图（DB v3）、视频抽帧缩略图、任务与历史子页 |
@@ -116,6 +116,8 @@ Kotlin 2.0 · Jetpack Compose · 内嵌 yt-dlp · 代理自动优选 · 系统�
 | **素材库定型**（09-10） | **两级筛选**（来源 / 分组 / 类型，时间·日期手风琴 + 作者手风琴）；时间线按下载时间倒序；视频封面 ColorOS 16 修复（fd 直传 + 启动批量回填）；删除链路重构（文件删成功才清 DB + 残留清理兜底）；素材库下载完成即时刷新 + 「查看素材」胶囊 |
 | **共享目录 & Root 探测**（09-10） | Edqiu 共享目录接入（共享引用模式：sidecar / 文件名 / 手动三级识别，导入时间=文件真实落盘时刻，App 外文件删除保护）；Root 代理探测（su 会话识别透明代理与内核入站，实测 KernelSU + NetProxy-Magisk）；测速主源 0 字节自动换备用源重试 |
 | **v1.1**（09-11） | **凭据安全加固**：X/IG Cookie 与 Clash 订阅原文迁 EncryptedSharedPreferences（Keystore AES256-GCM，旧明文自动迁移删除），手动粘贴与容器抓取同链路加密；设置页 Cookie 默认掩码隐藏、点「显示」查看/编辑；关闭云备份；明文流量白名单化（仅媒体 CDN 域）；yt-dlp 恢复 TLS 证书校验；计费网络自动跳过吞吐测速（防后台流量失控）；并发与下载链路加固（ConcurrentHashMap、同文件互斥、.part 带 taskId、收件箱查重下沉 DB） |
+| **16 KB 页对齐**（10-15） | **修复 Android 16+「应用兼容性」弹窗**：Chaquopy 16.0.0 → **16.1.0**（上游 #1324 将 `_chaquopy` 的 OpenSSL/SQLite stub 库改为 16 KB 链接）。APK 内 18 个 `.so`（arm64-v8a + x86_64）PT_LOAD 对齐全部 ≥ 16384；真机弹窗消失、Python 运行时 `warmup ok` |
+| **v1.2.0**（10-15） | 设置页参照 Edqiu 重排为六组目录卡；新增 GitHub Release 更新检测与内容弹窗；素材库点击即进全屏图片 / 视频同类滑动查看器；浮层常显、轻击收起、双击暂停、长按 5 秒查看详情；Tag `v*` 自动构建 APK 并发布 Release |
 
 ---
 
@@ -132,9 +134,15 @@ Kotlin 2.0 · Jetpack Compose · 内嵌 yt-dlp · 代理自动优选 · 系统�
 
 ## 📥 使用说明
 
+### 下载与更新
+
+- [下载最新 APK（v1.2.0）](https://github.com/Sdhop-let/media-Download/releases/tag/v1.2.0)
+- 应用内：设置 → 关于 → 检查更新，可查看 GitHub Release 更新内容并打开 APK 附件
+- [查看所有版本](https://github.com/Sdhop-let/media-Download/releases)
+
 ### 安装
 
-1. 从仓库 [`release/`](release) 目录下载最新 APK（debug 构建，约 54MB），或前往 [Releases](../../releases)
+1. 从 [v1.2.0 Releases](https://github.com/Sdhop-let/media-Download/releases/tag/v1.2.0) 下载 `MediaDownloader-v1.2.0.apk`，或前往 [全部 Releases](https://github.com/Sdhop-let/media-Download/releases)
 2. 安装需 Android 8.0（API 26）及以上
 3. 首次启动授予通知权限（后台下载进度通知）
 
@@ -168,15 +176,18 @@ Kotlin 2.0 · Jetpack Compose · 内嵌 yt-dlp · 代理自动优选 · 系统�
 ## 🔨 从源码构建
 
 ```bash
-# 环境要求：JDK 21 + Android SDK (API 35) + Gradle 8.9（wrapper 自带）
+# 环境要求：JDK 21 + Android SDK (API 36) + Gradle Wrapper 8.13 + Python 3.12
 cd android-app
 ./gradlew assembleDebug
-# 产物：app/build/outputs/apk/debug/app-debug.apk
+# Windows 本机 APK：D:/AndroidDev/build-epdownloader/app/outputs/apk/debug/app-debug.apk
+# Linux 默认 APK：android-app/build-epdownloader/app/outputs/apk/debug/app-debug.apk
 ```
 
-- 国内网络建议在 `settings.gradle.kts` 保留阿里云镜像配置
-- 中文项目路径需 `gradle.properties` 中 `android.overridePathCheck=true`（已配置）
-- yt-dlp 源码已直放 `src/main/python/`，无需构建期 pip 安装
+- `android-app/app/src/main/python/` 中的 yt-dlp 源码已直放，无需构建期 pip 安装
+- Windows 本机默认构建目录仍为 `D:/AndroidDev/build-epdownloader/app`；其他环境可用 `EP_BUILD_DIR` 指定
+- 设置 → 关于 → 「检查更新」会查询 GitHub 最新 Release，弹窗显示版本号、发布时间和更新内容；有新版本时可打开 APK 下载附件或 Release 发布页
+- 新版本发布流程：更新 `versionName` / `versionCode` 与 README，推送 `v*` tag（例如 `v1.2.0`），GitHub Actions 自动构建 Debug APK、上传 Actions artifact，并将 APK 附加到同 tag 的 GitHub Release
+- Chaquopy 16.1.0 所需 Python 3.12 通过 `CHAQUOPY_BUILD_PYTHON` 配置；CI 使用 Actions `setup-python`，其他构建机需安装 Python 3.12 并设置该环境变量
 
 ---
 

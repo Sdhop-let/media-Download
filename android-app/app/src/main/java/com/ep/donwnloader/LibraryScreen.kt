@@ -112,34 +112,44 @@ private fun parseIsoLocalDate(iso: String): LocalDate? {
  *  sortBase="posted"（2026-09-11 新增，修正"老帖挤新日期组"）：按发帖时间归组，
  *  时间线即推文时间线，2024 年的老帖沉回 2024，不再霸占最近日期。
  *  组间按日期倒序硬排序，杜绝"9月6日插到昨天前面"的乱序（旧版按出现顺序建组的 bug）。 */
+/** 日期解析失败的帖子统一归入此组（键名非 ISO，排序时映射为最小键恒排最后）。 */
+private const val UNKNOWN_DAY_KEY = "unknown"
+
 private fun groupByDownloadDay(rows: List<MediaItem>, sortBase: String = "downloaded"): List<DayGroup> {
     val today = LocalDate.now()
     val postMap = LinkedHashMap<Long, MutableList<MediaItem>>()
     rows.forEach { m -> postMap.getOrPut(m.postRowId) { mutableListOf() }.add(m) }
     val dayMap = HashMap<String, MutableList<MediaItem>>()
     postMap.values.forEach { items ->
-        val d: LocalDate = if (sortBase == "posted") {
-            parseIsoLocalDate(items.first().postTime) ?: today
+        // 日期解析不出时归入「日期未知」组（排最后），不再冒充「今天」。
+        // 旧实现用 today 兜底，会把没有发帖时间的帖子（IG / 本地导入 / 共享目录等）
+        // 错标成今天，与「按发帖时间」语义直接冲突。
+        val d: LocalDate? = if (sortBase == "posted") {
+            parseIsoLocalDate(items.first().postTime)
         } else {
-            items.maxOfOrNull { m ->
-                parseIsoLocalDate(m.downloadedAt) ?: parseIsoLocalDate(m.postTime) ?: today
-            } ?: today
+            items.mapNotNull { parseIsoLocalDate(it.downloadedAt) ?: parseIsoLocalDate(it.postTime) }
+                .maxOrNull()
         }
-        dayMap.getOrPut(d.toString()) { mutableListOf() }.addAll(items)
+        dayMap.getOrPut(d?.toString() ?: UNKNOWN_DAY_KEY) { mutableListOf() }.addAll(items)
     }
     val f = DateTimeFormatter.ofPattern("M月d日")
     val fY = DateTimeFormatter.ofPattern("yyyy年M月d日")
     return dayMap.entries
-        .sortedByDescending { it.key }   // ISO yyyy-MM-dd 字符序 = 日期倒序
+        // ISO yyyy-MM-dd 字符序 = 日期倒序；"unknown" 映射为空串 → 恒排最后
+        .sortedByDescending { if (it.key == UNKNOWN_DAY_KEY) "" else it.key }
         .map { (key, items) ->
-            val d = LocalDate.parse(key)
-            val label = when {
-                d == today -> "今天"
-                d == today.minusDays(1) -> "昨天"
-                d.year == today.year -> d.format(f)
-                else -> d.format(fY)
+            if (key == UNKNOWN_DAY_KEY) {
+                DayGroup(key, "日期未知", items)
+            } else {
+                val d = LocalDate.parse(key)
+                val label = when {
+                    d == today -> "今天"
+                    d == today.minusDays(1) -> "昨天"
+                    d.year == today.year -> d.format(f)
+                    else -> d.format(fY)
+                }
+                DayGroup(key, label, items)
             }
-            DayGroup(key, label, items)
         }
 }
 
@@ -148,13 +158,13 @@ fun LibraryScreen() {
     // 两级筛选：一级分类入口（来源/分组/类型，点击过渡展开二级选项）；二级为具体选项。
     var openSection by remember { mutableStateOf<String?>(null) }   // null|"origin"|"group"|"type"
     var group by remember { mutableStateOf("time") }                // 分组方式：time=按下载日期 / author=按作者
-    var sortBase by remember { mutableStateOf("downloaded") }       // 时间视图排序基准：downloaded=下载时间 / posted=发帖时间
+    var sortBase by remember { mutableStateOf(Store.prefs.librarySort) }       // 时间视图排序基准：downloaded=下载时间 / posted=发帖时间（持久化）
     var origin by remember { mutableStateOf("") }                   // ''=全部来源；'edqiu'=Edqiu 同步导入
     var platform by remember { mutableStateOf("") }
     var type by remember { mutableStateOf("") }
     var mediaItems by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
     var dayGroups by remember { mutableStateOf<List<DayGroup>>(emptyList()) }
-    val expandedDays = remember { mutableStateListOf<String>() }
+    // 时间视图已改为「通铺网格 + 吸顶日期」（2026-10-15），不再需要 expandedDays 手风琴状态
     // 作者分组状态
     var authors by remember { mutableStateOf<List<AuthorItem>>(emptyList()) }
     var expandedAuthorId by remember { mutableStateOf<Long?>(null) }
@@ -165,8 +175,8 @@ fun LibraryScreen() {
     var showAuthorStats by remember { mutableStateOf(false) }
     var pendingAuthorJump by remember { mutableStateOf<Long?>(null) }
     var selected by remember { mutableStateOf<MediaItem?>(null) }
-    var feed by remember { mutableStateOf<Pair<List<MediaItem>, Int>?>(null) }  // 竖滑视频流：列表 + 起始下标
-    var previewing by remember { mutableStateOf<MediaItem?>(null) }
+    // 全屏查看器：同类型列表 + 起始下标（图片视图只含图片、视频视图只含视频）
+    var viewer by remember { mutableStateOf<Pair<List<MediaItem>, Int>?>(null) }
     var reload by remember { mutableStateOf(0) }
     var loading by remember { mutableStateOf(true) }
     var lastFilterKey by remember { mutableStateOf("") }
@@ -201,9 +211,7 @@ fun LibraryScreen() {
             authorStatRows = Store.db.authorStats(platform, type, origin)
         }
         if (filterChanged) {
-            expandedDays.clear()
             expandedAuthorId = null
-            if (group == "time") dayGroups.firstOrNull()?.let { expandedDays.add(it.key) }
             // 作者统计弹层「查看素材」跨分组跳转：分组切换重置后恢复待展开的作者
             pendingAuthorJump?.let { expandedAuthorId = it }
             pendingAuthorJump = null
@@ -290,16 +298,20 @@ fun LibraryScreen() {
                     FilterChip("全部", platform == "" && origin == "") {
                         platform = ""; origin = ""; loading = true; openSection = null
                     }
+                    // 平台与「Edqiu」来源互斥：选平台清来源、选来源清平台。
+                    // 否则两维叠加后 chip 标签（originLabel 优先取 origin）与实际筛选不一致，
+                    // 表现为「先点 Edqiu 再点 X」时看着 X 没生效。
                     FilterChip("X", platform == "twitter") {
-                        platform = "twitter"; loading = true; openSection = null
+                        platform = "twitter"; origin = ""; loading = true; openSection = null
                     }
                     FilterChip("IG", platform == "instagram") {
-                        platform = "instagram"; loading = true; openSection = null
+                        platform = "instagram"; origin = ""; loading = true; openSection = null
                     }
                     FilterChip("Bluesky", platform == "bluesky") {
-                        platform = "bluesky"; loading = true; openSection = null
+                        platform = "bluesky"; origin = ""; loading = true; openSection = null
                     }
                     FilterChip("Edqiu", origin == "edqiu") {
+                        platform = ""
                         origin = if (origin == "edqiu") "" else "edqiu"
                         loading = true; openSection = null
                     }
@@ -319,10 +331,10 @@ fun LibraryScreen() {
                         Row(Modifier.padding(top = 4.dp),
                             horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             FilterChip("按下载时间", sortBase == "downloaded") {
-                                sortBase = "downloaded"; loading = true
+                                sortBase = "downloaded"; Store.prefs.librarySort = "downloaded"; loading = true
                             }
                             FilterChip("按发帖时间", sortBase == "posted") {
-                                sortBase = "posted"; loading = true
+                                sortBase = "posted"; Store.prefs.librarySort = "posted"; loading = true
                             }
                         }
                     }
@@ -347,10 +359,14 @@ fun LibraryScreen() {
                     verticalAlignment = Alignment.CenterVertically) {
                     Text("已选 ${selectedIds.size} 项", fontSize = 12.5.sp,
                         fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                    // 全选范围 = 当前视图已加载的素材：时间视图为全部筛选结果；作者视图为已展开作者的作品。
+                    // 未展开任何作者时无可选内容，按钮置灰，避免「点了没反应」。
+                    val selectable = if (group == "time") mediaItems else authorMedia
                     TextButton(onClick = {
                         selectedIds.clear()
-                        (if (group == "time") mediaItems else authorMedia).forEach { selectedIds.add(it.id) }
-                    }, contentPadding = PaddingValues(horizontal = 6.dp)) { Text("全选") }
+                        selectable.forEach { selectedIds.add(it.id) }
+                    }, enabled = selectable.isNotEmpty(),
+                        contentPadding = PaddingValues(horizontal = 6.dp)) { Text("全选") }
                     TextButton(onClick = {
                         selectMode = false
                         selectedIds.clear()
@@ -386,18 +402,20 @@ fun LibraryScreen() {
                     EmptyHint(platform.isNotBlank() || type.isNotBlank() || origin.isNotBlank())
                 group == "author" && authors.isEmpty() ->
                     EmptyHint(platform.isNotBlank() || type.isNotBlank() || origin.isNotBlank())
-                group == "time" -> AccordionList(
+                group == "time" -> StickyGridList(
                     groups = dayGroups,
-                    expandedDays = expandedDays,
                     selectMode = selectMode,
                     selectedIds = selectedIds,
-                    onToggle = { key ->
-                        if (key in expandedDays) expandedDays.remove(key) else expandedDays.add(key)
-                    },
                     onClick = { m ->
                         if (selectMode) {
                             if (m.id in selectedIds) selectedIds.remove(m.id) else selectedIds.add(m.id)
-                        } else selected = m
+                        } else {
+                            // 点击直接进全屏查看器：当前上下文内筛出同类型（图片只看图片 / 视频只看视频）
+                            val src = if (group == "time") mediaItems else authorMedia
+                            val same = src.filter { it.mediaType == m.mediaType }
+                            val idx = same.indexOfFirst { it.id == m.id }
+                            if (idx >= 0) viewer = same to idx
+                        }
                     },
                     onLongClick = { m ->
                         if (!selectMode) { selectMode = true; selectedIds.clear() }
@@ -414,7 +432,13 @@ fun LibraryScreen() {
                     onClick = { m ->
                         if (selectMode) {
                             if (m.id in selectedIds) selectedIds.remove(m.id) else selectedIds.add(m.id)
-                        } else selected = m
+                        } else {
+                            // 点击直接进全屏查看器：当前上下文内筛出同类型（图片只看图片 / 视频只看视频）
+                            val src = if (group == "time") mediaItems else authorMedia
+                            val same = src.filter { it.mediaType == m.mediaType }
+                            val idx = same.indexOfFirst { it.id == m.id }
+                            if (idx >= 0) viewer = same to idx
+                        }
                     },
                     onLongClick = { m ->
                         if (!selectMode) { selectMode = true; selectedIds.clear() }
@@ -445,21 +469,20 @@ fun LibraryScreen() {
         )
     }
 
+    // 详情与操作弹层：从查看器 ⋮「详情与操作」进入，保留播放/分享/复制链接/原帖/作者/删除
     selected?.let { m ->
         MediaSheet(m,
             onDismiss = { selected = null },
             onPlay = {
-                // 竖滑视频流（2026-09-10 用户定型）：范围为当前上下文的全部视频——
-                // 时间分组 = 当前筛选下的全部视频；作者分组 = 该作者全部视频。以点击视频为起点。
+                // 播放：回到全屏查看器（当前上下文的全部视频，以该视频为起点）
                 val src = if (group == "time") mediaItems else authorMedia
                 val videos = src.filter { it.mediaType == "video" }
                 val idx = videos.indexOfFirst { it.id == m.id }
                 selected = null
-                if (idx >= 0) feed = videos to idx
+                if (idx >= 0) viewer = videos to idx
             },
             onShare = { shareMedia(m) },
             onCopyLink = { copyLink(m) },
-            onPreview = { previewing = m },
             onDeleted = {
                 Store.scope.launch(Dispatchers.IO) {
                     Store.db.deleteMedia(m.id)
@@ -468,11 +491,14 @@ fun LibraryScreen() {
                 selected = null
             })
     }
-    feed?.let { (videos, idx) ->
-        VideoFeedDialog(items = videos, initialIndex = idx, onDismiss = { feed = null })
-    }
-    previewing?.let { m ->
-        ImageViewerDialog(path = m.filePath, onDismiss = { previewing = null })
+    // 全屏查看器：图片/视频共用竖滑分页，传入列表已按类型过滤
+    viewer?.let { (items, idx) ->
+        MediaViewerDialog(
+            items = items,
+            initialIndex = idx,
+            onDismiss = { viewer = null },
+            onShowDetails = { m -> selected = m },
+        )
     }
 }
 
@@ -516,45 +542,15 @@ private fun doShare(ctx: android.content.Context, f: File, m: MediaItem) {
 /** 复制帖子链接到剪贴板。 */
 fun copyLink(m: MediaItem) {
     val ctx = Store.appContext
+    // 本地导入 / 共享目录的普通文件没有原帖链接，避免静默复制一个空串
+    if (m.postUrl.isBlank()) {
+        Store.tasks.toast.value = "该素材没有原帖链接"
+        return
+    }
     runCatching {
         val cm = ctx.getSystemService(ClipboardManager::class.java)
         cm.setPrimaryClip(ClipData.newPlainText("post link", m.postUrl))
         Store.tasks.toast.value = "已复制帖子链接"
-    }
-}
-
-/** 全屏图片预览（黑底 + 点击任意处关闭）。外部共享路径先按需物化（root 通道，秒级）。 */
-@Composable
-fun ImageViewerDialog(path: String, onDismiss: () -> Unit) {
-    // 自有路径 local() 直接返回原 File；外部路径物化到 ro_share 后展示
-    var resolved by remember(path) { mutableStateOf(File(path).takeIf { it.isFile }) }
-    LaunchedEffect(path) {
-        if (resolved == null) {
-            val f = withContext(Dispatchers.IO) { ContentAccess.local(path) }
-            if (f != null) resolved = f
-        }
-    }
-    androidx.compose.ui.window.Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
-    ) {
-        Box(
-            Modifier.fillMaxSize().background(Color.Black).clickable { onDismiss() },
-            contentAlignment = Alignment.Center,
-        ) {
-            val f = resolved
-            if (f == null) {
-                Text("读取中…", color = Color.White.copy(alpha = 0.75f), fontSize = 14.sp)
-            } else {
-                AsyncImage(
-                    model = ImageRequest.Builder(LocalContext.current).data(f).build(),
-                    contentDescription = null,
-                    contentScale = ContentScale.Fit,
-                    imageLoader = Store.imageLoader,
-                    modifier = Modifier.fillMaxSize(),
-                )
-            }
-        }
     }
 }
 
@@ -607,7 +603,7 @@ private fun RowScope.FilterChip(label: String, selected: Boolean, onClick: () ->
             .then(
                 if (selected) Modifier.background(c.accent)
                 else Modifier.background(
-                    if (c.isDark) Color(0x14FFFFFF) else Color(0xB8FFFFFF))
+                    if (c.isDark) Color(0x14FFFFFF) else Color(0x20FFFFFF))
                     .border(1.dp, c.rim, RoundedCornerShape(100.dp)))
             .clickable { onClick() }
             .padding(vertical = 7.dp),
@@ -620,24 +616,32 @@ private fun RowScope.FilterChip(label: String, selected: Boolean, onClick: () ->
     }
 }
 
-/** 日期手风琴组头：日期标签 + 项数 + 旋转箭头（点击展开/收起该日下载的帖子）。 */
+/** 吸顶日期分隔条：左「日期 · N 项」胶囊（近不透明玻璃底，滚动内容从其下方穿过不透字）+ 右侧渐隐细线。 */
 @Composable
-private fun DayHeader(label: String, count: Int, expanded: Boolean, onToggle: () -> Unit) {
+private fun DateStickyHeader(label: String, count: Int) {
     val c = ios()
-    val angle by animateFloatAsState(if (expanded) 90f else 0f, label = "arrow")
     Row(
-        Modifier.fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .clickable(onClick = onToggle)
-            .padding(horizontal = 6.dp, vertical = 4.dp),
+        Modifier.fillMaxWidth().padding(vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(label, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = c.text)
-        Spacer(Modifier.width(6.dp))
-        Text("· $count 项", fontSize = 11.sp, color = c.faint)
-        Spacer(Modifier.weight(1f))
-        Text("▸", fontSize = 13.sp, color = c.faint,
-            modifier = Modifier.padding(horizontal = 6.dp).rotate(angle))
+        Box(
+            Modifier.clip(RoundedCornerShape(100.dp))
+                .background(if (c.isDark) Color(0xF20E1830) else Color(0xF2F4F8FE))
+                .border(1.dp, c.rim, RoundedCornerShape(100.dp))
+                .padding(horizontal = 12.dp, vertical = 5.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(label, fontSize = 12.5.sp, fontWeight = FontWeight.Bold, color = c.text)
+                Spacer(Modifier.width(6.dp))
+                Text("$count 项", fontSize = 10.5.sp, color = c.faint)
+            }
+        }
+        Spacer(Modifier.width(10.dp))
+        Box(
+            Modifier.weight(1f).height(1.dp)
+                .background(Brush.horizontalGradient(
+                    listOf(c.line.copy(alpha = if (c.isDark) 0.7f else 0.9f), Color.Transparent)))
+        )
     }
 }
 
@@ -653,7 +657,7 @@ private fun RowScope.SectionChip(label: String, value: String, open: Boolean, on
             .then(
                 if (open) Modifier.background(c.accent)
                 else Modifier.background(
-                    if (c.isDark) Color(0x14FFFFFF) else Color(0xB8FFFFFF))
+                    if (c.isDark) Color(0x14FFFFFF) else Color(0x20FFFFFF))
                     .border(1.dp, c.rim, RoundedCornerShape(100.dp)))
             .clickable(onClick = onClick)
             .padding(vertical = 7.dp),
@@ -756,44 +760,41 @@ private fun AuthorAccordion(
     }
 }
 
-/** 日期手风琴列表：组头（日期+项数+旋转箭头）点击展开/收起；组内为 3 列正方形预览框网格
- *  （复用 MediaCell：视频 ▶ / Edqiu E 角标 / 批量选中天然兼容），行级出入场动画。 */
+/** 时间视图（2026-10-15 排版重构）：3 列网格通铺 + 日期分隔条吸顶。
+ *  与旧「日期手风琴」的区别：不再逐日点开/收起，滚动即浏览全部，日期条滚动时吸顶常驻。
+ *  长按批量选择、点击详情、视频 ▶ / Edqiu E 角标全部沿用 MediaCell，功能不变。 */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun AccordionList(
+private fun StickyGridList(
     groups: List<DayGroup>,
-    expandedDays: List<String>,
     selectMode: Boolean,
     selectedIds: List<Long>,
-    onToggle: (String) -> Unit,
     onClick: (MediaItem) -> Unit,
     onLongClick: (MediaItem) -> Unit,
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(12.dp, 2.dp, 12.dp, 100.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         groups.forEach { g ->
-            val expanded = g.key in expandedDays
-            item(key = "h_" + g.key) {
-                DayHeader(g.label, g.items.size, expanded) { onToggle(g.key) }
+            stickyHeader(key = "sh_" + g.key) {
+                DateStickyHeader(g.label, g.items.size)
             }
-            if (expanded) {
-                val rows = g.items.chunked(3)
-                items(rows.size, key = { ri -> "r_${g.key}_${rows[ri].first().id}" }) { ri ->
-                    val row = rows[ri]
-                    Row(Modifier.fillMaxWidth().animateItem(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        row.forEach { m ->
-                            Box(Modifier.weight(1f)) {
-                                MediaCell(m,
-                                    selected = selectMode && m.id in selectedIds,
-                                    onClick = { onClick(m) },
-                                    onLongClick = { onLongClick(m) })
-                            }
+            val rows = g.items.chunked(3)
+            items(rows.size, key = { ri -> "r_${g.key}_${rows[ri].first().id}" }) { ri ->
+                val row = rows[ri]
+                Row(Modifier.fillMaxWidth().animateItem(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    row.forEach { m ->
+                        Box(Modifier.weight(1f)) {
+                            MediaCell(m,
+                                selected = selectMode && m.id in selectedIds,
+                                onClick = { onClick(m) },
+                                onLongClick = { onLongClick(m) })
                         }
-                        repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
                     }
+                    repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
                 }
             }
         }
@@ -909,7 +910,6 @@ private fun MediaSheet(
     onPlay: () -> Unit,
     onShare: () -> Unit,
     onCopyLink: () -> Unit,
-    onPreview: () -> Unit,
     onDeleted: () -> Unit,
 ) {
     val c = LocalMonet.current
@@ -917,7 +917,7 @@ private fun MediaSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = if (c.isDark) Color(0xF20E1830) else Color(0xF7F4F8FE),
+        containerColor = if (c.isDark) Color(0xF20E1830) else Color(0xCDF4F8FE),
         contentColor = c.text,
         scrimColor = Color(0x66000000),
         dragHandle = {
@@ -939,18 +939,8 @@ private fun MediaSheet(
                     contentScale = ContentScale.Fit,
                     imageLoader = Store.imageLoader,
                     modifier = Modifier.fillMaxWidth().heightIn(max = 460.dp)
-                        .clip(RoundedCornerShape(18.dp))
-                        .then(
-                            if (m.mediaType == "photo")
-                                Modifier.clickable { onPreview() }
-                            else Modifier),
+                        .clip(RoundedCornerShape(18.dp)),
                 )
-                if (m.mediaType == "photo") {
-                    Text("点按图片可全屏预览",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = c.faint,
-                        modifier = Modifier.padding(top = 4.dp))
-                }
                 Spacer(Modifier.height(14.dp))
             }
             Text("@${m.handle}", style = MaterialTheme.typography.titleMedium,
@@ -1012,7 +1002,7 @@ private fun AuthorStatsSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = if (c.isDark) Color(0xF20E1830) else Color(0xF7F4F8FE),
+        containerColor = if (c.isDark) Color(0xF20E1830) else Color(0xCDF4F8FE),
         contentColor = c.text,
         scrimColor = Color(0x66000000),
         dragHandle = {

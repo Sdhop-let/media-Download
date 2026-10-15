@@ -91,27 +91,41 @@ fun nowIso(): String =
         timeZone = TimeZone.getTimeZone("UTC")
     }.format(Date())
 
+/** 纪元秒 → UTC ISO（非法/非正值返回空串）。 */
+private fun epochToIso(sec: Long): String {
+    if (sec <= 0L) return ""
+    return SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
+        timeZone = TimeZone.getTimeZone("UTC")
+    }.format(Date(sec * 1000))
+}
+
 fun toIso(v: String?): String {
     if (v.isNullOrBlank()) return ""
-    return try {
-        // 兼容 "2026-09-05T01:19:16.451Z" / "2026-09-05 01:19:16" / 纪元秒
-        val clean = v.trim().replace(" ", "T")
-        val parsed = if (clean.all { it.isDigit() }) {
-            SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date(clean.toLong() * 1000))
+    val s = v.trim()
+    return runCatching {
+        if (s.all { it.isDigit() }) {
+            // 纯数字 = 纪元秒（IG taken_at / fxtwitter created_timestamp）→ UTC ISO
+            epochToIso(s.toLong())
         } else {
-            val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US)
-            sdf.timeZone = TimeZone.getTimeZone("UTC")
-            sdf.format(sdf.parse(clean.substring(0, 19))!!)
+            val clean = s.replace(" ", "T")
+            if (clean.length >= 19 && clean[4] == '-' && clean[7] == '-') {
+                // 含 yyyy-MM-dd 的 ISO 变体（带 Z / 毫秒 / 空格分隔）→ 取前 19 位标准化为 UTC ISO
+                val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).apply {
+                    timeZone = TimeZone.getTimeZone("UTC")
+                }
+                sdf.format(sdf.parse(clean.substring(0, 19))!!) + "Z"
+            } else {
+                // 平台原始格式：Twitter "EEE MMM dd HH:mm:ss +0000 yyyy"
+                val sdf = SimpleDateFormat("EEE MMM dd HH:mm:ss Z yyyy", Locale.US)
+                epochToIso(sdf.parse(s).time / 1000)
+            }
         }
-        parsed + "Z"
-    } catch (e: Exception) {
-        ""
-    }
+    }.getOrDefault("")
 }
 
 // ---------------- SQLite ----------------
 
-class Db(context: Context) : SQLiteOpenHelper(context, "app.db", null, 6) {
+class Db(context: Context) : SQLiteOpenHelper(context, "app.db", null, 7) {
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
@@ -154,6 +168,8 @@ class Db(context: Context) : SQLiteOpenHelper(context, "app.db", null, 6) {
             event TEXT, detail TEXT)""")
         createInbox(db)
         ensureV5(db)  // 幂等：别名表 + 索引（media.content_hash 已在上面建列）
+        ensureV6(db)
+        ensureV7(db)
     }
 
     /** 检查列是否存在。 */
@@ -216,18 +232,29 @@ class Db(context: Context) : SQLiteOpenHelper(context, "app.db", null, 6) {
             // v6：media.origin 来源标记（Edqiu 导入识别），ensureV6 幂等执行
             ensureV6(db)
         }
+        if (oldV < 7) {
+            // v7：posts.task_id（任务→帖子归属，删除任务级联清素材），ensureV7 幂等执行
+            ensureV7(db)
+        }
     }
 
     override fun onOpen(db: SQLiteDatabase) {
         // 结构自愈：版本号与 schema 错位的库（如 v5 号 + v4 结构）打开即修复
         ensureV5(db)
         ensureV6(db)
+        ensureV7(db)
     }
 
     /** v6 结构自愈（幂等）：media.origin 素材来源标记（''=自下载，'edqiu'=Edqiu 导入）。 */
     fun ensureV6(db: SQLiteDatabase) {
         if (!colExists(db, "media", "origin"))
             db.execSQL("ALTER TABLE media ADD COLUMN origin TEXT DEFAULT ''")
+    }
+
+    /** v7 结构自愈（幂等）：posts.task_id 记录任务→帖子归属，删除任务时据此级联软删素材。 */
+    fun ensureV7(db: SQLiteDatabase) {
+        if (!colExists(db, "posts", "task_id"))
+            db.execSQL("ALTER TABLE posts ADD COLUMN task_id INTEGER DEFAULT 0")
     }
 
     // ---------- authors / posts / media ----------
@@ -310,6 +337,21 @@ class Db(context: Context) : SQLiteOpenHelper(context, "app.db", null, 6) {
             "SELECT id FROM posts WHERE platform=? AND post_id=?", arrayOf(platform, postId)).use {
             it.moveToFirst(); it.getLong(0)
         }
+    }
+
+    /** 记录帖子归属到下载任务（后下载的任务覆盖旧归属，删除旧任务不会误删仍在库的素材）。 */
+    fun attachPostToTask(postRowId: Long, taskId: Long) {
+        writableDatabase.execSQL("UPDATE posts SET task_id=? WHERE id=?",
+            arrayOf(taskId.toString(), postRowId.toString()))
+    }
+
+    /** 删除任务时级联软删其产生的素材（进回收站，可恢复）。 */
+    fun softDeleteTaskMedia(taskId: Long) {
+        val now = nowIso()
+        writableDatabase.execSQL(
+            "UPDATE media SET deleted=1, deleted_at=? WHERE deleted=0 AND post_row_id IN " +
+                "(SELECT id FROM posts WHERE task_id=?)",
+            arrayOf(now, taskId.toString()))
     }
 
     /** mediaIndex 传 -1 = 自动分配（nextMediaIndex：同帖现有最大值+1，回收站条目也占位）。
@@ -409,10 +451,11 @@ class Db(context: Context) : SQLiteOpenHelper(context, "app.db", null, 6) {
             out
         }
 
-    fun updateAuthorUid(id: Long, uid: String) {
-        writableDatabase.execSQL(
-            "UPDATE authors SET platform_uid=? WHERE id=? AND platform_uid=''",
-            arrayOf(uid, id))
+    /** 仅在 UID 为空时回填；返回是否真的写入（调用方据此计数，避免虚报成功数）。 */
+    fun updateAuthorUid(id: Long, uid: String): Boolean {
+        val cv = ContentValues().apply { put("platform_uid", uid) }
+        return writableDatabase.update("authors", cv, "id=? AND platform_uid=''",
+            arrayOf(id.toString())) > 0
     }
 
     /** 回填作者资料：UID 必写；name/avatar 非空才覆盖（fxtwitter 为实时权威值，共享导入作者补头像与最新显示名）。 */
@@ -462,6 +505,27 @@ class Db(context: Context) : SQLiteOpenHelper(context, "app.db", null, 6) {
     fun updatePostCreatedAt(id: Long, iso: String) {
         writableDatabase.execSQL("UPDATE posts SET created_at=? WHERE id=?", arrayOf(iso, id))
     }
+
+    /** X 帖子且 created_at 空缺的行：(id, post_id)。发帖时间可凭推文 ID 雪花解码零网络回填。 */
+    fun twitterPostsWithoutDate(): List<Pair<Long, String>> =
+        readableDatabase.rawQuery(
+            "SELECT id, post_id FROM posts WHERE platform='twitter' AND (created_at='' OR created_at IS NULL)",
+            null).use { c ->
+            val out = mutableListOf<Pair<Long, String>>()
+            while (c.moveToNext()) out.add(c.getLong(0) to (c.getString(1) ?: ""))
+            out
+        }
+
+    /** created_at 为旧版 toIso 纪元秒 bug 产物的行（形如 "yyyyMMdd_HHmmss[Z]"）：
+     *  本地时区、非 ISO，素材库无法按发帖时间识别。返回 (id, created_at) 供就地回转修复。 */
+    fun legacyMalformedDates(): List<Pair<Long, String>> =
+        readableDatabase.rawQuery(
+            "SELECT id, created_at FROM posts WHERE created_at GLOB '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]_[0-9][0-9][0-9][0-9][0-9][0-9]*'",
+            null).use { c ->
+            val out = mutableListOf<Pair<Long, String>>()
+            while (c.moveToNext()) out.add(c.getLong(0) to (c.getString(1) ?: ""))
+            out
+        }
 
     /** hash 为空的素材行：(id, file_path)。含回收站条目（其 hash 参与"恢复+顶替"闸门判定）。 */
     fun mediaWithoutHash(): List<Pair<Long, String>> =
@@ -549,6 +613,9 @@ class Db(context: Context) : SQLiteOpenHelper(context, "app.db", null, 6) {
             }
             out
         }
+        // perAuthor <= 0：调用方不需要作者内嵌作品（作者视图自行按需查询）。
+        // 直接返回，避免对每位作者各发一次必然空结果的查询（旧实现的 N+1 空查询）。
+        if (perAuthor <= 0) return rows
         return rows.map { a -> a.copy(items = listMediaTime("", "", "", a.id, 0, perAuthor)) }
     }
 
@@ -831,6 +898,13 @@ class Db(context: Context) : SQLiteOpenHelper(context, "app.db", null, 6) {
         val sets = fields.joinToString(",") { "${it.first}=?" }
         val args = fields.map { it.second?.toString() ?: "" } + id.toString()
         writableDatabase.execSQL("UPDATE tasks SET $sets WHERE id=?", args.toTypedArray())
+    }
+
+    /** 字节级进度增量（大文件流式下载高频上报；原子累加，避免每块读回整行）。 */
+    fun incTaskBytes(id: Long, delta: Long) {
+        if (delta <= 0L) return
+        writableDatabase.execSQL(
+            "UPDATE tasks SET bytes = bytes + ? WHERE id=?", arrayOf(delta.toString(), id.toString()))
     }
 
     fun getTask(id: Long): TaskItem? =

@@ -16,6 +16,11 @@ import okio.Buffer
 import org.json.JSONObject
 import java.net.InetSocketAddress
 import java.net.Proxy
+import java.time.Instant
+import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 
@@ -242,6 +247,11 @@ class Prefs(ctx: Context) {
         get() = sp.getString("accent_seed", "") ?: ""
         set(v) = sp.edit().putString("accent_seed", v).apply()
 
+    /** 素材库时间视图排序基准："downloaded"=下载时间 / "posted"=发帖时间 */
+    var librarySort: String
+        get() = sp.getString("library_sort", "downloaded") ?: "downloaded"
+        set(v) = sp.edit().putString("library_sort", v).apply()
+
     /** X Cookie 拼接为请求头（两个值都有才算配置好） */
     fun twCookieHeader(): String =
         if (twAuthToken.isNotBlank() && twCt0.isNotBlank())
@@ -397,7 +407,41 @@ fun fmtBytes(n: Long): String = when {
 
 fun fmtSpeed(bps: Double): String = fmtBytes(bps.toLong()) + "/s"
 
+/**
+ * 收件箱预览图专用缩略 URL：X 图片 CDN（pbs.twimg.com）把 name=orig/large/4096x4096
+ * 归一为 name=small（≈680px）。收件箱预览框只有 72dp，拿原图（动辄数 MB）经代理拉取
+ * 极易超时失败 → 预览呈现为空白方块（2026-10-15 修复）。
+ * 写入（TaskManager.fetchMeta）与渲染（DownloadScreen.InboxCard）两处都过一遍：
+ * 前者保证新数据落库即小图，后者救回库里已存的旧原图 URL。
+ * 仅影响收件箱预览；下载链路仍用 MediaRef.url 原图，画质不受影响。
+ */
+fun previewThumbUrl(raw: String): String {
+    if (raw.isBlank() || !raw.contains("pbs.twimg.com")) return raw
+    val path = raw.substringBefore('?')
+    val query = raw.substringAfter('?', "")
+    // 已经是指定小尺寸变体，或路径自带扩展名（视频缩略图 ext_tw_video_thumb/.../x.jpg）→ 原样返回
+    if (Regex("(?:^|&)name=(small|medium|360x360)").containsMatchIn(query)) return raw
+    if (Regex("\\.[A-Za-z0-9]{2,5}$").containsMatchIn(path)) return raw
+    val fmt = Regex("(?:^|&)format=([A-Za-z0-9]+)").find(query)?.groupValues?.get(1) ?: "jpg"
+    return "$path?format=$fmt&name=small"
+}
+
+/** 统一时间显示（中文日期 + 时刻，转为本地时区）：
+ *  今天 HH:mm / 昨天 HH:mm / M月d日 HH:mm / yyyy年M月d日 HH:mm。无法解析时原样返回；空串返回「—」。 */
 fun fmtIso(iso: String): String {
-    if (iso.length < 16) return iso.ifBlank { "—" }
-    return iso.substring(0, 10) + " " + iso.substring(11, 16)
+    if (iso.isBlank()) return "—"
+    val dt: LocalDateTime = runCatching {
+        Instant.parse(iso).atZone(ZoneId.systemDefault()).toLocalDateTime()
+    }.recoverCatching {
+        LocalDateTime.parse(iso.trim().replace(" ", "T").substring(0, 19))
+    }.getOrNull() ?: return iso.trim()
+    val today = LocalDate.now()
+    val d = dt.toLocalDate()
+    val hm = dt.format(DateTimeFormatter.ofPattern("HH:mm"))
+    return when {
+        d == today -> "今天 $hm"
+        d == today.minusDays(1) -> "昨天 $hm"
+        d.year == today.year -> dt.format(DateTimeFormatter.ofPattern("M月d日 HH:mm"))
+        else -> dt.format(DateTimeFormatter.ofPattern("yyyy年M月d日 HH:mm"))
+    }
 }

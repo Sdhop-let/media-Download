@@ -302,13 +302,6 @@ private fun WebView.destroySafely() {
     }
 }
 
-private fun hideKeyboard(v: View) {
-    val imm = v.context.getSystemService(android.content.Context.INPUT_METHOD_SERVICE)
-        as? android.view.inputmethod.InputMethodManager ?: return
-    imm.hideSoftInputFromWindow(v.windowToken, 0)
-    v.clearFocus()
-}
-
 /** 布局塌缩兜底：html/main/layers 实际高度异常（<50px）时用 innerHeight 像素直写。 */
 private fun repairLayout(v: WebView) {
     v.evaluateJavascript(

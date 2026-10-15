@@ -23,6 +23,9 @@ class TaskManager {
     val inbox = MutableStateFlow<List<InboxItem>>(emptyList())
     val toast = MutableStateFlow<String?>(null)
     val donePulse = MutableStateFlow<DonePulse?>(null)
+    /** 值得上灵动岛（长下载）的任务 id 集合：含视频 或 文件数 ≥ 2。
+     *  只增不减（内存态，重启清空），供 DownloadService 决定是否请求 promoted 灵动岛展示。 */
+    val heavyTasks = MutableStateFlow<Set<Long>>(emptySet())
 
     private val queue = Channel<Long>(Channel.UNLIMITED)
     private val cancelFlags = java.util.concurrent.ConcurrentHashMap<Long, Boolean>()
@@ -43,6 +46,7 @@ class TaskManager {
         Store.scope.launch(Dispatchers.IO) {
             runCatching { Store.db.upgradeAvatarVariants() }
             runCatching { if (fixImportedTimestamps()) Store.mediaVersion++ }
+            runCatching { if (backfillPostDates()) Store.mediaVersion++ }
             runCatching { backfillHashes() }
             runCatching { backfillAuthorUids() }
         }
@@ -102,20 +106,44 @@ class TaskManager {
     private fun fetchMeta(id: Long, url: String) {
         try {
             val route = Store.proxy.currentRoute() ?: Store.proxy.alternateRoute()
-            val plan = Extractors.plan(url, Http(route), Store.prefs.maxBskyPosts, Store.prefs.igCookie)
+            var plan = Extractors.plan(url, Http(route), Store.prefs.maxBskyPosts, Store.prefs.igCookie)
+            // 原生元数据接口失效/限流（fxtwitter、IG 移动 API 等）返回空时，降级走 yt-dlp 提取，
+            // 保住收件箱预览封面与作者头像（下载链路本就依赖 yt-dlp，成功率更高）
+            if (plan.posts.isEmpty()) {
+                YtDlp.fallbackPlan(url)?.takeIf { it.posts.isNotEmpty() }?.let { plan = it }
+            }
             val first = plan.posts.firstOrNull()
             // 收件箱预览图：优先照片，视频取封面缩图（无缩图则留空显示占位）
             val m0 = first?.media?.firstOrNull { it.type == "photo" } ?: first?.media?.firstOrNull()
-            val preview = m0?.let {
+            val preview = previewThumbUrl(m0?.let {
                 if (it.type == "photo") it.thumbUrl.ifBlank { it.url } else it.thumbUrl
-            } ?: ""
+            } ?: "")
             Store.db.updateInboxMeta(
                 id, plan.platform, plan.kind,
                 first?.author?.handle ?: "", first?.author?.name ?: "",
                 first?.author?.avatarUrl ?: "", first?.text ?: "",
                 plan.posts.sumOf { it.media.size }, preview)
             refreshInbox()
-        } catch (_: Exception) { /* 元数据失败不影响下载 */ }
+        } catch (t: Exception) {
+            android.util.Log.w("TaskManager", "fetchMeta 失败：$url (${t.message})")
+        }
+    }
+
+    /** 本进程内已补拉过预览的收件箱 id（避免永久失败的条目每次进页都重试）。 */
+    private val inboxMetaRetried = java.util.concurrent.ConcurrentHashMap.newKeySet<Long>()
+
+    /**
+     * 收件箱预览补齐（进下载页时调用，幂等）：对预览为空且非下载中的条目重拉一次元数据。
+     * 背景：旧版 fetchMeta 失败后无重试，且 updateInboxMeta 的 CASE 只在非空时覆盖 →
+     * 首次拉取失败（代理抖动 / 平台限流）的条目预览会永久空白。
+     * 每个条目在本进程内只补拉一次，避免对已删除/不可见的链接反复请求。
+     */
+    fun backfillInboxMeta() {
+        val targets = Store.db.listInbox()
+            .filter { it.previewUrl.isBlank() && it.status != "downloading" }
+            .filter { inboxMetaRetried.add(it.id) }
+        if (targets.isEmpty()) return
+        targets.forEach { item -> Store.scope.launch(Dispatchers.IO) { fetchMeta(item.id, item.url) } }
     }
 
     /** 批量下载收件箱项。 */
@@ -166,7 +194,9 @@ class TaskManager {
 
     fun retry(id: Long) {
         val t = Store.db.getTask(id) ?: return
-        if (t.status !in listOf("error", "done", "canceled")) return
+        // partial（部分完成）必须可重试：失败文件要能补下。
+        // 此前遗漏该状态，而 TaskCard 对 partial 明确渲染了「重试」按钮 → 点了静默无反应。
+        if (t.status !in listOf("error", "done", "partial", "canceled")) return
         Store.db.updateTask(id, "status" to "queued", "error" to "", "message" to "",
             "total_files" to 0, "done_files" to 0, "skipped" to 0, "bytes" to 0,
             "finished_at" to "")
@@ -178,8 +208,10 @@ class TaskManager {
 
     fun delete(id: Long) {
         cancel(id)
+        Store.db.softDeleteTaskMedia(id)
         Store.db.deleteTask(id)
         refresh()
+        Store.mediaVersion++  // 素材库即时移除被级联软删的素材
     }
 
     private suspend fun worker() {
@@ -225,6 +257,10 @@ class TaskManager {
             val total = plan.posts.sumOf { it.media.size }
             Store.db.updateTask(id, "total_files" to total, "platform" to plan.platform,
                 "kind" to plan.kind, "message" to plan.note)
+            // 长下载判定：含视频或多文件 → 值得上灵动岛实时展示；纯小图秒下完走轻量反馈
+            val hasVideo = plan.posts.any { p -> p.media.any { it.type == "video" } }
+            if (hasVideo || total >= 2) heavyTasks.value = heavyTasks.value + id
+            refresh()
             for (post in plan.posts) {
                 if (canceled(id)) throw InterruptedException()
                 downloadPost(id, post, route, alt)
@@ -299,6 +335,7 @@ class TaskManager {
             post.author.avatarUrl, post.author.profileUrl, post.author.uid)
         val prow = Store.db.upsertPost(
             post.platform, post.postId, post.postUrl, authorId, post.createdAt, post.text)
+        Store.db.attachPostToTask(prow, id)
         var bytes = 0L
         for (m in post.media) {
             if (canceled(id)) throw InterruptedException()
@@ -336,7 +373,7 @@ class TaskManager {
                 val thumb = if (m.type == "video") makeVideoThumb(dest) else ""
                 Store.db.updateMediaRow(hit.rowId, dest.absolutePath, bytes, thumb, fileHash(dest))
                 if (hit.deleted) Store.db.restoreMedia(hit.rowId)
-                bump(id, done = 1, bytes = bytes)
+                bump(id, done = 1)
                 Store.mediaVersion++
                 refresh()
                 continue
@@ -363,7 +400,7 @@ class TaskManager {
                     Store.db.restoreMedia(dup.first)
                     Store.db.updateMediaRow(dup.first, dest.absolutePath, bytes, thumb, hash)
                     Store.mediaVersion++
-                    bump(id, done = 1, bytes = bytes)
+                    bump(id, done = 1)
                 } else {
                     // active 重复（同帖防御 / 他帖裂帖）→ 不重复入库
                     dest.delete()
@@ -378,7 +415,7 @@ class TaskManager {
                 dest.delete()
                 bump(id, skipped = 1)
             } else {
-                bump(id, done = 1, bytes = bytes)
+                bump(id, done = 1)
                 Store.mediaVersion++  // 新媒体入库 → 素材库即时刷新（无需切页重进）
             }
             refresh()
@@ -447,7 +484,24 @@ class TaskManager {
                             if (!resp.isSuccessful) throw Exception("HTTP ${resp.code}")
                             val src = resp.body?.byteStream() ?: throw Exception("空响应")
                             tmp.outputStream().use { out ->
-                                src.copyTo(out, bufferSize = 1 shl 16)
+                                // 流式落盘并节流上报字节进度，驱动灵动岛/状态栏实时刷新
+                                val buf = ByteArray(1 shl 16)
+                                var acc = 0L
+                                var lastTick = 0L
+                                while (true) {
+                                    val n = src.read(buf)
+                                    if (n < 0) break
+                                    out.write(buf, 0, n)
+                                    acc += n
+                                    val t = System.currentTimeMillis()
+                                    if (acc >= (256L shl 10) || t - lastTick >= 250) {
+                                        Store.db.incTaskBytes(id, acc)
+                                        refresh()
+                                        acc = 0L
+                                        lastTick = t
+                                    }
+                                }
+                                if (acc > 0L) { Store.db.incTaskBytes(id, acc); refresh() }
                             }
                         }
                         val size = tmp.length()
@@ -528,8 +582,8 @@ class TaskManager {
                         ok++
                     }
                     "bluesky" -> {
-                        Store.db.updateAuthorUid(aid, Extractors.bskyDid(handle, http))
-                        ok++
+                        // updateAuthorUid 带 platform_uid='' 条件，返回是否真的写入，据此计数防虚报
+                        if (Store.db.updateAuthorUid(aid, Extractors.bskyDid(handle, http))) ok++
                     }
                     "instagram" -> {
                         if (igCookie.isBlank()) continue
@@ -541,8 +595,7 @@ class TaskManager {
                                 "Cookie" to igCookie))
                         val uid = uj.optJSONObject("data")?.optJSONObject("user")
                             ?.optString("id", "")?.ifBlank { null } ?: continue
-                        Store.db.updateAuthorUid(aid, uid)
-                        ok++
+                        if (Store.db.updateAuthorUid(aid, uid)) ok++
                     }
                     else -> continue
                 }
@@ -687,6 +740,41 @@ class TaskManager {
         }
         return changed
     }
+
+    /**
+     * X 帖子发帖时间空缺回填（启动巡检，零网络，幂等）：旧版 fxtwitter 提取 created_at 时
+     * 用错访问器（optJSONObject 读数字字段）导致落库为空串，素材库「按发帖时间」无法识别。
+     * 推文 ID 本身是雪花 ID，反解即为发帖时间绝对真相，据此回填。
+     * 另就地修复旧版 toIso 纪元秒 bug 写出的畸形 "yyyyMMdd_HHmmss[Z]"（本地时区）格式。返回是否发生修正。
+     */
+    private fun backfillPostDates(): Boolean {
+        var changed = false
+        for ((id, pid) in Store.db.twitterPostsWithoutDate()) {
+            val iso = snowflakeIso(pid)
+            if (iso.isNotEmpty()) {
+                Store.db.updatePostCreatedAt(id, iso)
+                changed = true
+            }
+        }
+        for ((id, raw) in Store.db.legacyMalformedDates()) {
+            val iso = legacyDateToIso(raw)
+            if (iso.isNotEmpty()) {
+                Store.db.updatePostCreatedAt(id, iso)
+                changed = true
+            }
+        }
+        return changed
+    }
+
+    /** 旧版 toIso 纪元秒 bug 产物 "yyyyMMdd_HHmmss[Z]"（本地时区）→ UTC ISO；解析失败返回空串。 */
+    private fun legacyDateToIso(raw: String): String = try {
+        val m = Regex("""(\d{8})_(\d{6})""").find(raw) ?: return ""
+        val local = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US)
+            .parse("${m.groupValues[1]}_${m.groupValues[2]}") ?: return ""
+        java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.US)
+            .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
+            .format(local)
+    } catch (_: Exception) { "" }
 
     /**
      * 外部目录同步（2026-09-11 root 直读改造）：扫描目录（含子目录）中的图片/视频，

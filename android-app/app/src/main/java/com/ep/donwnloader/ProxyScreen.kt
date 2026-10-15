@@ -196,7 +196,9 @@ fun ProxyScreen() {
                             scope.launch(Dispatchers.IO) { Store.proxy.detectAndTest("手动检测") }
                         }, enabled = !testing, modifier = Modifier.weight(1f))
                         GlassButton("立即测速", onClick = {
-                            scope.launch(Dispatchers.IO) { Store.proxy.testAll() }
+                            // 必须走 testNow：置 testing 门控（防连点并发重入）+ 计费网络节流 + 落日志。
+                            // 直调 testAll() 不设 testing，按钮 enabled=!testing 恒真，可并发跑多份测速。
+                            scope.launch(Dispatchers.IO) { Store.proxy.testNow() }
                         }, enabled = !testing, kind = ButtonKind.Ghost,
                             modifier = Modifier.weight(1f))
                     }
@@ -366,7 +368,7 @@ fun ProxyScreen() {
     if (pasteOpen) {        val c = ios()
         ModalBottomSheet(
             onDismissRequest = { pasteOpen = false },
-            containerColor = if (c.isDark) Color(0xF20E1830) else Color(0xF7F4F8FE),
+            containerColor = if (c.isDark) Color(0xF20E1830) else Color(0xCDF4F8FE),
             scrimColor = Color(0x66000000),
         ) {
             Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, bottom = 30.dp)) {
@@ -400,7 +402,7 @@ fun ProxyScreen() {
         val c = ios()
         ModalBottomSheet(
             onDismissRequest = { urlOpen = false },
-            containerColor = if (c.isDark) Color(0xF20E1830) else Color(0xF7F4F8FE),
+            containerColor = if (c.isDark) Color(0xF20E1830) else Color(0xCDF4F8FE),
             scrimColor = Color(0x66000000),
         ) {
             Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, bottom = 30.dp)) {
@@ -426,8 +428,12 @@ fun ProxyScreen() {
                         return@GlassButton
                     }
                     scope.launch(Dispatchers.IO) {
-                        // 当前路由失败自动回退直连再试一次（下载通道同款容错）
-                        val routes = listOfNotNull(Store.proxy.currentRoute(), null).distinct()
+                        // 当前路由失败自动回退直连再试一次（下载通道同款容错）。
+                        // 注意：不能写成 listOfNotNull(Store.proxy.currentRoute(), null)——currentRoute()
+                        // 为 null（直连模式 / 无可用候选）时该表达式会被过滤成空表，
+                        // 结果一个请求都不发就直接报「失败」。
+                        val cur = Store.proxy.currentRoute()
+                        val routes: List<String?> = if (cur == null) listOf(null) else listOf(cur, null)
                         var text: String? = null
                         var err: Exception? = null
                         for (r in routes) {

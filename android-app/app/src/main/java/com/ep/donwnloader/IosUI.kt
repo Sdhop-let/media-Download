@@ -289,9 +289,9 @@ private fun glassBrush(c: MonetColors): Brush {
         start = Offset(0f, 0f), end = Offset(0.45f, 1f),
     )
     else Brush.linearGradient(
-        0f to Color(0xB8FFFFFF),
-        0.55f to Color(0x75FFFFFF),
-        1f to Color(0x57FFFFFF),
+        0f to Color(0x38FFFFFF),
+        0.55f to Color(0x20FFFFFF),
+        1f to Color(0x14FFFFFF),
         start = Offset(0f, 0f), end = Offset(0.45f, 1f),
     )
 }
@@ -316,7 +316,8 @@ fun GlassBackground(modifier: Modifier = Modifier, content: @Composable BoxScope
     }
 }
 
-/** 玻璃卡片：主题化半透明渐变 + 高光描边 + 蓝调投影 + 可选状态顶条。 */
+/** 玻璃卡片：主题化半透明渐变 + 加强高光描边（顶亮底柔）+ 光影（顶部镜面高光/对角流光）+ 可选状态顶条。
+ *  注：不再用 Modifier.shadow（透明玻璃会把投影透成整块暗斑），光影改用高光/流光覆盖层实现，不拦截点击。 */
 @Composable
 fun GlassCard(
     modifier: Modifier = Modifier,
@@ -324,15 +325,27 @@ fun GlassCard(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val c = LocalMonet.current
+    val shape = RoundedCornerShape(24.dp)
+    // 加强描边：比全局 c.rim 更亮（浅色 80% / 深色 25%），贴近 iOS 液态玻璃的锐利亮边
+    val rimStrong = if (c.isDark) Color(0x40FFFFFF) else Color(0xCCFFFFFF)
     Box(
         modifier
-            .shadow(14.dp, RoundedCornerShape(24.dp),
-                ambientColor = c.glow, spotColor = c.glow)
-            .clip(RoundedCornerShape(24.dp))
+            .clip(shape)
             .background(glassBrush(c))
-            .border(1.dp, c.rim, RoundedCornerShape(24.dp)),
+            .border(1.5.dp, rimStrong, shape),
     ) {
         Column(Modifier.padding(top = if (topStripe != null) 5.dp else 0.dp)) { content() }
+        // 光影①：顶部镜面高光（沿上缘向中部渐隐）
+        Box(Modifier.matchParentSize().background(
+            Brush.verticalGradient(
+                0f to Color.White.copy(alpha = if (c.isDark) 0.10f else 0.22f),
+                0.45f to Color.Transparent)))
+        // 光影②：对角流光（左上向下的轻微反光，增加玻璃体积感）
+        Box(Modifier.matchParentSize().background(
+            Brush.linearGradient(
+                0f to Color.White.copy(alpha = if (c.isDark) 0.05f else 0.12f),
+                0.28f to Color.Transparent,
+                start = Offset.Zero, end = Offset(1400f, 800f))))
         if (topStripe != null) {
             Box(Modifier.align(Alignment.TopCenter).fillMaxWidth().height(3.dp).background(topStripe))
         }
@@ -650,7 +663,7 @@ fun GlassButton(
             c.primaryA.copy(alpha = alpha), c.primary.copy(alpha = alpha), c.primaryDeep.copy(alpha = alpha)))
     else Brush.linearGradient(
         if (c.isDark) listOf(Color(0x1CFFFFFF).copy(alpha = alpha), Color(0x0EFFFFFF).copy(alpha = alpha))
-        else listOf(Color(0xB8FFFFFF).copy(alpha = alpha), Color(0x75FFFFFF).copy(alpha = alpha)))
+        else listOf(Color(0x20FFFFFF).copy(alpha = alpha), Color(0x14FFFFFF).copy(alpha = alpha)))
     Box(
         modifier
             .clip(shape)
@@ -720,7 +733,7 @@ fun IosChip(label: String, selected: Boolean, onClick: () -> Unit) {
             .then(
                 if (selected) Modifier.background(c.accent)
                 else Modifier.background(
-                    if (c.isDark) Color(0x14FFFFFF) else Color(0xB8FFFFFF))
+                    if (c.isDark) Color(0x14FFFFFF) else Color(0x20FFFFFF))
                     .border(1.dp, c.rim, RoundedCornerShape(100.dp)))
             .clickable { onClick() }
             .padding(horizontal = 14.dp, vertical = 7.dp),

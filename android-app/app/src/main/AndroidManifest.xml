@@ -5,6 +5,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Android 16+ 实时更新（Live Update）：ColorOS 16/17 灵动岛/流体云 与原生状态栏胶囊。
+         非运行时权限，仅声明即可；通知侧仍按 setRequestPromotedOngoing 实际请求提拔。 -->
+    <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
     <!-- 底部胶囊通知（后台下载完成提示）：TYPE_APPLICATION_OVERLAY 需要 -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <!-- 壁纸取色：读取真实壁纸文件（ColorOS 等引擎壁纸下 getWallpaperColors 不可靠，须读文件自取色；

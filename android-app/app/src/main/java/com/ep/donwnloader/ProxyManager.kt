@@ -51,7 +51,8 @@ class ProxyManager {
         else -> best?.url()
     }
 
-    /** 备用路由：直连失败换最优代理；代理失败换直连。 */
+    /** 备用路由：当前走直连时返回一个可用代理（直连失败 → 换代理）；当前已是代理时无备用（返回 null）。
+     *  注：null 兼作「无备用」与「直连」两种语义，故调用方不会在代理失败后再退直连。 */
     fun alternateRoute(): String? {
         if (currentRoute() == null) {
             return cands.value.firstOrNull { it.alive && it.type != "direct" }?.url()
@@ -69,7 +70,14 @@ class ProxyManager {
         Store.db.addProxyLog("模式", "切换为 $mode" + (manual?.let { "（$it）" } ?: ""))
         publish()
         when (mode) {
-            "manual" -> if (manual != null) Store.scope.launch(Dispatchers.IO) { verifyManual(manual) }
+            // 地址为空时不做验证：空串会被 Net.probe 退化成「直连」探测并成功，
+            // 进而误报「手动代理已生效」并把错误横幅清掉（实际全走直连）。
+            "manual" -> if (!manual.isNullOrBlank()) {
+                Store.scope.launch(Dispatchers.IO) { verifyManual(manual) }
+            } else {
+                lastError.value = "手动模式未填写代理地址，当前仍走直连"
+                Store.db.addProxyLog("错误", "切换到手动模式但代理地址为空")
+            }
             "auto" -> Store.scope.launch(Dispatchers.IO) { detectAndTest("模式切换后检测") }
             else -> lastError.value = null   // 直连：清除错误横幅
         }
@@ -77,6 +85,8 @@ class ProxyManager {
 
     /** 手动代理即时连通性验证：成功清错误 + 报延迟，失败设错误横幅 + 提示。 */
     private suspend fun verifyManual(manual: String) {
+        // 防御：空白地址一律不探测（Net.probe("") 会退化为直连探测并误报成功）
+        if (manual.isBlank()) { lastError.value = "手动代理地址为空"; return }
         testing.value = true
         publish()
         try {
@@ -287,6 +297,24 @@ class ProxyManager {
         }
         best = cands.value.filter { it.alive }.maxByOrNull { it.score }
         publish()
+    }
+
+    /** 代理页「立即测速」入口：置 testing 门控（防连点并发重入），按网络计费情况决定是否跑吞吐，
+     *  完成后落日志并刷新 lastFullMs（与周期复测共用同一时间基准）。 */
+    suspend fun testNow() {
+        if (testing.value) return
+        if (cands.value.isEmpty()) { detectAndTest("手动测速"); return }
+        testing.value = true
+        publish()
+        try {
+            testAll(testThroughput = !meteredNetwork())
+            Store.db.addProxyLog("测速",
+                "手动测速完成，当前最优 ${bestLabel()}（评分 ${"%.2f".format(best?.score ?: 0.0)}）")
+        } finally {
+            testing.value = false
+            lastFullMs = System.currentTimeMillis()
+            publish()
+        }
     }
 
     /** 阶段 1：一次 204 探测定连通与延迟（5s 超时）。 */

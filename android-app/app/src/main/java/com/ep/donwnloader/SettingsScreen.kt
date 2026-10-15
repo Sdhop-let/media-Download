@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -29,9 +30,12 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -81,7 +85,23 @@ fun SettingsScreen() {
     var recycleOpen by remember { mutableStateOf(false) }
     var deletedItems by remember { mutableStateOf(listOf<MediaItem>()) }
     var deletedCnt by remember { mutableStateOf(0) }
-    androidx.compose.runtime.LaunchedEffect(Unit) {
+    // 目录卡展开状态（参照 Edqiu 的可展开目录）：同时只展开一组，null = 全收起
+    var openGroup by remember { mutableStateOf<String?>(null) }
+    // 更新检测（GitHub Releases）。状态提升到本 composable 而非「关于」分组内——
+    // 否则分组滚出屏幕被 LazyColumn 销毁时，正在展示的弹窗会跟着消失。
+    val appVersionName = remember {
+        runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }
+            .getOrNull() ?: "1.1"
+    }
+    var updateReq by remember { mutableStateOf(0L) }      // 请求序号：取消后丢弃过期结果
+    var updateStage by remember { mutableStateOf("idle") }  // idle | loading | result | error
+    var updateRelease by remember { mutableStateOf<ReleaseInfo?>(null) }
+    var updateError by remember { mutableStateOf("") }
+    val cancelUpdate: () -> Unit = { updateReq = 0L; updateStage = "idle" }
+    // key 用 recycleOpen：从回收站子页返回时重新计数。
+    // 此前 key 为 Unit，而本 Effect 声明在子页早返回之前、全程留在组合中，
+    // 子页内「恢复 / 彻底删除」后返回，设置页的回收站计数仍是旧值。
+    androidx.compose.runtime.LaunchedEffect(recycleOpen) {
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             deletedCnt = Store.db.deletedCount()
         }
@@ -109,11 +129,11 @@ fun SettingsScreen() {
                 modifier = Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 4.dp))
         }
 
-        // ══════════ 板块一：下载与网络 ══════════
+        // ══════════ 分组一：下载 ══════════
         item {
-            GlassCard {
-                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    GroupHeader("📥", "下载与网络")
+            SettingsDirCard("download", "📥", "下载", "分享 · 通知 · 抓取上限",
+                openKey = openGroup, onToggle = { openGroup = it }) {
+                Column(Modifier.padding(top = 2.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     SwitchRow("分享自动下载",
                         "X / Instagram / Bluesky 分享给本应用即自动进收件箱下载；关闭则只入收件箱",
                         shareAuto) { shareAuto = it; Store.prefs.shareAutoDownload = it }
@@ -152,7 +172,15 @@ fun SettingsScreen() {
                             singleLine = true,
                         )
                     }
-                    RowDivider()
+                }
+            }
+        }
+
+        // ══════════ 分组二：账号 ══════════
+        item {
+            SettingsDirCard("account", "🔑", "账号", "受限内容 / 主页解析",
+                openKey = openGroup, onToggle = { openGroup = it }) {
+                Column(Modifier.padding(top = 2.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     // X Cookie（可折叠，chevron 动画；副标题随抓取状态刷新）
                     CollapseRow("X / Twitter Cookie",
                         if (Store.prefs.twCookieHeader().isNotBlank()) "已配置 · 受限内容与主页解析用"
@@ -228,7 +256,15 @@ fun SettingsScreen() {
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
-                    RowDivider()
+                }
+            }
+        }
+
+        // ══════════ 分组三：网络 ══════════
+        item {
+            SettingsDirCard("network", "🌐", "网络", "代理优选 · 测速",
+                openKey = openGroup, onToggle = { openGroup = it }) {
+                Column(Modifier.padding(top = 2.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     // 代理优选（开关 + 折叠，chevron 动画）
                     Row(Modifier.fillMaxWidth()
                         .clip(RoundedCornerShape(10.dp))
@@ -266,15 +302,31 @@ fun SettingsScreen() {
                                 modifier = Modifier.weight(1f))
                         }
                     }
+                    RowDivider()
+                    // 代理详情与测速在独立页面，这里给直达入口
+                    Row(Modifier.fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { Store.selectedTab = 2 }
+                        .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("代理详情与测速", fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                            Text("候选列表、延迟/吞吐测速、事件日志、Clash 配置导入",
+                                fontSize = 10.5.sp, lineHeight = 14.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 1.dp))
+                        }
+                        Chevron(open = false)
+                    }
                 }
             }
         }
 
-        // ══════════ 板块二：存储管理 ══════════
+        // ══════════ 分组四：素材 ══════════
         item {
-            GlassCard {
-                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    GroupHeader("🗂", "存储管理", hint = "素材库 · 回收站")
+            SettingsDirCard("storage", "🗂", "素材", "扫描 · 同步 · 回收站",
+                openKey = openGroup, onToggle = { openGroup = it }) {
+                Column(Modifier.padding(top = 2.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Row(Modifier.fillMaxWidth().padding(vertical = 6.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         val scope2 = rememberCoroutineScope()
@@ -324,11 +376,11 @@ fun SettingsScreen() {
             }
         }
 
-        // ══════════ 板块三：外观与主题 ══════════
+        // ══════════ 分组五：外观 ══════════
         item {
-            GlassCard {
-                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    GroupHeader("🎨", "外观与主题")
+            SettingsDirCard("appearance", "🎨", "外观", "主题 · 莫奈取色",
+                openKey = openGroup, onToggle = { openGroup = it }) {
+                Column(Modifier.padding(top = 2.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     IosSegmented(
                         options = listOf("跟随系统", "浅色", "深色"),
                         selected = when (Store.themeMode) { "light" -> 1; "dark" -> 2; else -> 0 },
@@ -393,17 +445,49 @@ fun SettingsScreen() {
             }
         }
 
-        // ══════════ 板块四：关于（含支持范围） ══════════
+        // ══════════ 分组六：关于 ══════════
         item {
-            GlassCard {
-                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    GroupHeader("ℹ️", "关于")
+            SettingsDirCard("about", "ℹ️", "关于", "版本 · 检查更新 · 支持范围",
+                openKey = openGroup, onToggle = { openGroup = it }) {
+                Column(Modifier.padding(top = 2.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Column(Modifier.padding(vertical = 6.dp)) {
-                        Text("媒体下载器 Android v1.1", fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        Text("媒体下载器 Android v$appVersionName", fontSize = 13.sp, fontWeight = FontWeight.Medium)
                         Text("包名 com.ep.donwnloader", fontSize = 10.5.sp, lineHeight = 14.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(top = 1.dp))
                     }
+                    RowDivider()
+                    SettingsNavRow(
+                        title = "检查更新",
+                        subtitle = "最新版本来自 GitHub Releases；检测完成后弹窗展示更新内容",
+                        onClick = {
+                            if (updateStage == "loading") return@SettingsNavRow
+                            updateReq = System.currentTimeMillis()
+                            val req = updateReq
+                            updateError = ""
+                            updateStage = "loading"
+                            scope.launch {
+                                // 当前路由失败回退直连再试一次。
+                                // 不能写成 listOfNotNull(cur, null)：cur 为 null（直连模式）时会过滤成空表，
+                                // 结果一个请求都不发就直接报「失败」。
+                                val result = withContext(Dispatchers.IO) {
+                                    val cur = Store.proxy.currentRoute()
+                                    val routes = if (cur == null) listOf<String?>(null) else listOf(cur, null)
+                                    var info: ReleaseInfo? = null
+                                    var err: Exception? = null
+                                    for (r in routes) {
+                                        try { info = UpdateChecker.check(r); break }
+                                        catch (e: Exception) { err = e }
+                                    }
+                                    info to err
+                                }
+                                if (updateReq != req) return@launch   // 已被取消，丢弃过期结果
+                                val (info, err) = result
+                                if (info != null) { updateRelease = info; updateStage = "result" }
+                                else { updateError = err?.message ?: "网络不可用"; updateStage = "error" }
+                            }
+                        },
+                    )
                     RowDivider()
                     Column(Modifier.padding(vertical = 6.dp)) {
                         Text("支持范围", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
@@ -430,6 +514,131 @@ fun SettingsScreen() {
             }
         }
     }
+
+    // 更新检测弹窗：随设置页（不随「关于」分组），分组收起/滚出屏都不影响。
+    // 必须放在 LazyColumn 之外——LazyColumn 的内容 lambda 是 LazyListScope，不是 @Composable 上下文。
+    if (updateStage != "idle") {
+        UpdateDialog(
+            loading = updateStage == "loading",
+            error = updateError,
+            release = updateRelease,
+            currentVersion = appVersionName,
+            onDismiss = cancelUpdate,
+        )
+    }
+}
+
+/** 设置内的导航行：标题 + 副标题 + chevron（如「检查更新」「代理详情与测速」）。 */
+@Composable
+private fun SettingsNavRow(title: String, subtitle: String, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth()
+        .clip(RoundedCornerShape(10.dp))
+        .clickable { onClick() }
+        .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(title, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            Text(subtitle, fontSize = 10.5.sp, lineHeight = 14.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 1.dp))
+        }
+        Chevron(open = false)
+    }
+}
+
+/**
+ * 更新检测结果弹窗：检测中 / 检测失败 / 有新版本 / 已是最新。
+ * 四个形态都会展示 release 的更新内容（cleanNotes 清理后的纯文本），只是按钮不同：
+ * 有新版本 →「下载安装包」直达 APK 附件；否则 →「查看发布页」。
+ */
+@Composable
+private fun UpdateDialog(
+    loading: Boolean,
+    error: String,
+    release: ReleaseInfo?,
+    currentVersion: String,
+    onDismiss: () -> Unit,
+) {
+    val c = ios()
+    val rel = release
+    val versionOrder = rel?.let { UpdateChecker.compare(it.tag, currentVersion) } ?: 0
+    val newer = rel != null && versionOrder > 0
+    AlertDialog(
+        onDismissRequest = { if (!loading) onDismiss() },
+        containerColor = if (c.isDark) Color(0xF20E1830) else Color(0xD4F4F8FE),
+        titleContentColor = c.text,
+        textContentColor = c.text2,
+        title = {
+            Text(when {
+                loading -> "检测更新"
+                error.isNotBlank() -> "检测失败"
+                newer -> "发现新版本 ${rel?.tag}"
+                versionOrder == 0 -> "已是最新版本"
+                else -> "当前版本较新"
+            }, fontWeight = FontWeight.Bold)
+        },
+        text = {
+            Column(Modifier.fillMaxWidth().heightIn(max = 420.dp)
+                .verticalScroll(rememberScrollState())) {
+                when {
+                    loading -> Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            color = c.primary, strokeWidth = 2.dp,
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Text("正在连接 GitHub Releases…",
+                            style = MaterialTheme.typography.bodySmall, color = c.faint)
+                    }
+                    error.isNotBlank() -> Text(error, style = MaterialTheme.typography.bodySmall)
+                    rel != null -> {
+                        Text("当前版本 v$currentVersion · 最新版本 ${rel.tag}",
+                            style = MaterialTheme.typography.labelSmall, color = c.faint)
+                        if (rel.publishedAt.isNotBlank()) {
+                            Text("发布于 ${fmtIso(rel.publishedAt)}",
+                                style = MaterialTheme.typography.labelSmall, color = c.faint)
+                        }
+                        if (versionOrder == 0) {
+                            Text("已是最新版本，以下是最新版本的更新内容",
+                                style = MaterialTheme.typography.bodySmall, color = OkColor,
+                                modifier = Modifier.padding(top = 6.dp))
+                        } else if (versionOrder < 0) {
+                            Text("当前安装版本高于仓库最新 Release；以下显示仓库发布说明",
+                                style = MaterialTheme.typography.bodySmall, color = OkColor,
+                                modifier = Modifier.padding(top = 6.dp))
+                        }
+                        Text("更新内容", fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                            color = c.text, modifier = Modifier.padding(top = 10.dp, bottom = 4.dp))
+                        Text(rel.notes.ifBlank { "（该版本未提供更新说明）" },
+                            style = MaterialTheme.typography.bodySmall, color = c.text2)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            when {
+                loading -> TextButton(onClick = onDismiss) { Text("取消", color = c.faint) }
+                error.isNotBlank() -> TextButton(onClick = onDismiss) { Text("关闭") }
+                else -> {
+                    val r = rel
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        // r != null 放最前：newer 已隐含 rel 非空，放后面会被编译器判为冗余条件
+                        if (r != null && newer && r.apkUrl.isNotBlank()) {
+                            TextButton(onClick = { Store.openUrl(r.apkUrl) }) {
+                                Text("下载安装包", color = c.primary)
+                            }
+                            Spacer(Modifier.width(4.dp))
+                        }
+                        if (r != null) {
+                            TextButton(onClick = { Store.openUrl(r.pageUrl) }) { Text("发布页") }
+                            Spacer(Modifier.width(4.dp))
+                        }
+                        TextButton(onClick = onDismiss) { Text(if (newer) "稍后" else "关闭") }
+                    }
+                }
+            }
+        },
+    )
 }
 
 /** 可折叠分区块头：动画 chevron 指示展开方向（内容侧过渡由 AnimatedVisibility 处理）。 */
@@ -447,27 +656,6 @@ private fun CollapseRow(title: String, subtitle: String, open: Boolean, onToggle
                 modifier = Modifier.padding(top = 1.dp))
         }
         Chevron(open = open, modifier = Modifier.padding(start = 8.dp))
-    }
-}
-
-/** 板块组头：主色圆片图标 + 标题 + 可选尾注。 */
-@Composable
-private fun GroupHeader(icon: String, title: String, hint: String? = null) {
-    val c = ios()
-    Row(Modifier.padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(
-            Modifier.size(26.dp)
-                .clip(RoundedCornerShape(9.dp))
-                .background(c.primary.copy(alpha = if (c.isDark) 0.22f else 0.10f))
-                .border(0.5.dp, c.primary.copy(alpha = 0.22f), RoundedCornerShape(9.dp)),
-            contentAlignment = Alignment.Center,
-        ) { Text(icon, fontSize = 12.sp) }
-        Spacer(Modifier.width(8.dp))
-        Text(title, fontSize = 13.5.sp, fontWeight = FontWeight.Bold, color = c.text)
-        if (hint != null) {
-            Spacer(Modifier.width(7.dp))
-            Text(hint, fontSize = 10.5.sp, color = c.faint)
-        }
     }
 }
 
@@ -495,6 +683,55 @@ private fun SwitchRow(
                 modifier = Modifier.padding(top = 1.dp))
         }
         IosSwitch(checked = checked, onChange = onChange, modifier = Modifier.padding(start = 10.dp))
+    }
+}
+
+/** 设置目录卡（参照 Edqiu 的「可展开目录」）：整行 = 方形图标底 + 标题 + 副标题 + chevron；
+ *  点击整行展开/收起本组设置项（同时只展开一组），展开内容经 AnimatedVisibility 渐显。 */
+@Composable
+private fun SettingsDirCard(
+    key: String,
+    icon: String,
+    title: String,
+    subtitle: String,
+    openKey: String?,
+    onToggle: (String) -> Unit,
+    content: @Composable () -> Unit,
+) {
+    val c = ios()
+    val open = openKey == key
+    GlassCard {
+        Column {
+            Row(Modifier.fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .clickable { onToggle(if (open) "" else key) }
+                .padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                // 方形图标底（Edqiu 同款：圆角方块 + 主色低透明底 + 细描边）
+                Box(
+                    Modifier.size(42.dp)
+                        .clip(RoundedCornerShape(13.dp))
+                        .background(c.primary.copy(alpha = if (c.isDark) 0.22f else 0.10f))
+                        .border(0.5.dp, c.primary.copy(alpha = 0.22f), RoundedCornerShape(13.dp)),
+                    contentAlignment = Alignment.Center,
+                ) { Text(icon, fontSize = 18.sp) }
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(title, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = c.text)
+                    Text(subtitle, fontSize = 11.5.sp, lineHeight = 15.sp, color = c.faint,
+                        modifier = Modifier.padding(top = 2.dp))
+                }
+                Chevron(open = open, modifier = Modifier.padding(start = 8.dp))
+            }
+            AnimatedVisibility(open, enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut()) {
+                Column(Modifier.padding(start = 12.dp, end = 12.dp, bottom = 10.dp)) {
+                    RowDivider()
+                    Spacer(Modifier.height(2.dp))
+                    content()
+                }
+            }
+        }
     }
 }
 
@@ -876,7 +1113,7 @@ private fun RecycleSheet(m: MediaItem, onDismiss: () -> Unit, onRestore: () -> U
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = if (c.isDark) Color(0xF20E1830) else Color(0xF7F4F8FE),
+        containerColor = if (c.isDark) Color(0xF20E1830) else Color(0xCDF4F8FE),
         contentColor = c.text,
         scrimColor = Color(0x66000000),
         dragHandle = {
@@ -918,8 +1155,12 @@ private fun RecycleSheet(m: MediaItem, onDismiss: () -> Unit, onRestore: () -> U
 @Composable
 private fun ConfirmDialog(title: String, text: String, onConfirm: () -> Unit, onDismiss: () -> Unit,
                           confirmText: String = "确认删除") {
+    val c = ios()
     AlertDialog(
         onDismissRequest = onDismiss,
+        containerColor = if (c.isDark) Color(0xF20E1830) else Color(0xD4F4F8FE),
+        titleContentColor = c.text,
+        textContentColor = c.text2,
         title = { Text(title, fontWeight = FontWeight.Bold) },
         text = { Text(text, style = MaterialTheme.typography.bodySmall) },
         confirmButton = {

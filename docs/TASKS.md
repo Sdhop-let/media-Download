@@ -2,66 +2,6 @@
 
 > 标记：✅ 完成 / ⬜ 待办。每项均为可独立验证的小任务。
 
-## M0 项目初始化
-- ✅ T0.1 技术调研（docs/RESEARCH.md）
-- ✅ T0.2 创建 venv，安装依赖（fastapi / uvicorn / gallery-dl / httpx[socks] / pysocks）
-- ✅ T0.3 关键技术假设实测（代理检测、bsky API、fxtwitter、gallery-dl -j 结构）
-- ✅ T0.4 .gitignore / requirements.txt / 项目骨架
-- ✅ T0.5 UI 设计方案（docs/UI_DESIGN.md）
-
-## M1 代理模块（backend/app/services/）
-- ✅ T1.1 `proxy_detector.py`：环境变量检测
-- ✅ T1.2 注册表检测（ProxyEnable/ProxyServer 双格式/AutoConfigURL PAC 正则提取）
-- ✅ T1.3 常见端口扫描（7897/7890/7891/2080/10808/10809/1080/8080/8888…）+ HTTP/SOCKS5 协议归类
-- ✅ T1.4 `proxy_tester.py`：延迟测试（generate_204×2 均值）
-- ✅ T1.5 吞吐测试（speed.cloudflare.com 限时截断）
-- ✅ T1.6 评分与最优选择（含「直连」基线）
-- ✅ T1.7 后台持续优选协程（周期复测 + 显著更优才切换 + 事件推送）
-- ✅ T1.8 代理事件日志（切换/测速结果入库）
-- ✅ T1.9 REST API：`/api/proxy/status` `/api/proxy/detect` `/api/proxy/test` `/api/proxy/mode` `/api/proxy/log`
-
-## M2 下载模块
-- ✅ T2.1 URL 解析与平台识别（x.com/twitter.com、instagram.com、bsky.app）
-- ✅ T2.2 fxtwitter 提取器（单条推文，免登录）：media.all[] → 规范化媒体项
-- ✅ T2.3 Bluesky 直连提取器（免登录）：getPostThread / getAuthorFeed → getBlob 直链（图片）；视频走 gallery-dl 兜底
-- ✅ T2.4 gallery-dl 子进程通道（Instagram 全部 / Twitter 主页 / 兜底）：`--write-metadata` 边车 + `-d` 目录模板 + `--proxy`
-- ✅ T2.5 元数据规范化（post_id/author/date/post_url 各平台键名差异的回退链）
-- ✅ T2.6 异步任务队列（并发上限、状态机 queued→running→done/error/partial/canceled）
-- ✅ T2.7 自研下载器：httpx 异步分块下载 + 字节级进度 + 当前最优代理
-- ✅ T2.8 去重：`UNIQUE(platform, post_id, media_index)`，重复内容跳过并计数
-- ✅ T2.9 文件命名：`downloads/{平台}/{作者}/yyyymmdd_HHMM_{postid}_{序号}.{ext}`
-- ✅ T2.10 gallery-dl 产物索引器（扫描新文件 + 边车 JSON 入库，含去重）
-- ✅ T2.11 视频缩略图（ffmpeg 抽帧，失败回退占位图）
-- ✅ T2.12 SSE 事件流 `/api/events`（任务进度/代理变更实时推送）
-- ✅ T2.13 REST API：任务增删查、重试、打开目录
-- ✅ T2.14 Cookies 配置（Twitter/Instagram cookies.txt 路径，设置页可改）
-
-## M3 素材库
-- ✅ T3.1 SQLite 模型：authors / posts / media / tasks / proxy 表
-- ✅ T3.2 按时间排序 API（发帖时间倒序，分页）
-- ✅ T3.3 按作者分组 API（作者卡片 + 各作者内按时间倒序）
-- ✅ T3.4 平台/类型/关键词筛选
-- ✅ T3.5 回跳数据：每条素材保存 `post_url`（原帖）与 `author.profile_url`（作者主页）
-- ✅ T3.6 删除素材（删文件 + 删记录）、打开所在文件夹
-- ✅ T3.7 统计（总数/各平台数/磁盘占用）
-
-## M4 前端 UI（原生 HTML/CSS/JS + Vue3，无构建步骤）
-- ✅ T4.1 设计系统（暗色为主、CSS 变量、平台品牌色、深浅色切换）
-- ✅ T4.2 应用骨架（左侧导航 + 页面路由 + 全局 toast + SSE 接入）
-- ✅ T4.3 下载页：粘贴框（多行/多链接）+ 平台识别提示 + 任务卡片（进度/速度/状态/重试/回跳）
-- ✅ T4.4 素材库页：时间⇄作者分段切换 + 平台筛选 chips + 网格瀑布卡片 + hover 操作（回跳原帖/作者主页/打开文件/删除）+ 加载更多
-- ✅ T4.5 代理页：当前代理状态卡（模式切换/立即测速）+ 候选列表表格（来源/协议/延迟/速度/评分/状态）+ 自动优选开关与间隔
-- ✅ T4.6 设置页：下载目录/并发数/cookies 配置/关于
-- ✅ T4.7 空状态、加载态、错误态设计
-
-## M5 联调交付
-- ✅ T5.1 端到端测试：Bluesky 主页真实下载（经代理）→ 入库 → 素材库呈现
-- ✅ T5.2 端到端测试：fxtwitter 单条推文下载
-- ✅ T5.3 UI 浏览器实测（四页截图核验）
-- ✅ T5.4 start.bat 一键启动（自动建 venv、装依赖、开浏览器）
-- ✅ T5.5 README（安装/使用/cookies 教程/常见问题）
-- ✅ T5.6 git 就绪（文件已全部就位；按惯例未自动 commit，需要时可执行 `git add -A && git commit -m "init"`）
-
 ## M6 Android 端（com.ep.donwnloader，Kotlin + Jetpack Compose）
 - ✅ T6.1 环境就绪（SDK/AVD/WHPX；下载 Gradle 8.9 → 生成 wrapper；阿里云镜像源）
 - ✅ T6.2 项目骨架（AGP 8.7.3/Kotlin 2.0.21/Compose BOM；中文路径豁免；INTERNET 权限；SEND 分享接入）
@@ -121,9 +61,6 @@
 ## 已知限制（v1）
 - Instagram 必须提供浏览器导出的 cookies.txt，且 cookies 过期需手动更新
 - Twitter 主页批量下载需 cookies；单条推文免登录（fxtwitter）
-- x.com `/i/web/status/` 形式的链接（无 handle）走 gallery-dl 兜底
-- Bluesky 视频为 HLS，v1 经 gallery-dl 通道下载
-- gallery-dl 通道（子进程）为文件级进度（按已完成文件数），自研通道为字节级进度
 
 ## 作者统计（2026-09-11，真机验证待设备接入）
 - ✅ Db.kt：新增 `AuthorStatRow`（id/平台/handle/名字/头像/素材数/图片/视频/帖子数/容量/最近入库）+ `authorStats(platform, type, origin)`——按当前筛选聚合每位作者素材维度，素材数降序、容量次序，只含有素材作者（与作者视图口径一致）
@@ -143,3 +80,12 @@
 - ✅ TaskManager：countExternalDir（预览计数）+ removeExternalDir（退订执行：清理 App 内缩略图文件 → 硬删登记行 → refresh + mediaVersion++；文件一律不动，posts/authors 留孤儿——不进视图、再同步 upsertPost 复用归并不丢，与 purgeEntries 行为一致）
 - ✅ SyncExternalScreen：「移除该目录登记」按钮（!syncing && !removing 才可点）→ IO 计数 → 0 则 toast「该目录暂无已登记素材」→ ConfirmDialog（红字「解除登记」，文案注明文件保留原位/可再同步）→ 执行后 result 行显示「已解除登记 N 项」；说明文字补退订语义
 - ⏳ 真机验证：设备仍未连接，三项（作者统计/同步取消/目录退订）插线后一并闭环
+
+## Android 16 兼容性修复·16 KB 页对齐（2026-10-15，真机已验证）
+- 现象：PLK110（ColorOS 16 / Android 16）每次启动弹系统「Android 应用兼容性」告警，点名 3 个 Chaquopy 原生库
+- 定位：读 APK 内 18 个 `.so` 的 ELF64 PT_LOAD `p_align` —— 只有 `libssl_chaquopy.so` / `libcrypto_chaquopy.so` / `libsqlite3_chaquopy.so` 是 4096（各 3688 字节的 stub 库），其余（含 `libpython3.12.so`）已是 16384
+- 排除二进制补丁：三个 stub 的 `(vaddr-off)%16384` = 0/4096/8192，不满足对齐同余要求，改 `p_align` 无效
+- ✅ 修复：Chaquopy **16.0.0 → 16.1.0**（上游 #1324 将 `_chaquopy` 的 OpenSSL/SQLite stub 改为 16 KB 链接；该版同时正式支持 AGP 8.9）
+- ✅ `mirror_chaquopy.py` 改造：版本 16.0.0→16.1.0、代理 7897→7890、补 target 3.12.15-0；重跑镜像 runtime 5 组件 + target 到 `D:\AndroidDev\maven-local`
+- ✅ 校验：APK 内 arm64-v8a + x86_64 共 18 个 `.so`，**未对齐数量 0**；真机弹窗消失、logcat 无兼容性告警、nativeloader 三个 stub 库加载 ok、`YtDlp: warmup ok: python started`、无崩溃
+- 顺带说明：日志里出现的 `/system/bin/app_process64` 崩溃（`DexLoadReporterExtImpl` / `Swordfish` 的 UnsatisfiedLinkError）是 ColorOS 系统组件自身问题，与 App 无关

@@ -99,7 +99,11 @@ fun DownloadScreen() {
         Store.pendingShare?.let { input = it; Store.pendingShare = null; pasteOpen = true }
     }
     LaunchedEffect(Unit) {
-        Store.scope.launch(Dispatchers.IO) { Store.tasks.refresh(); Store.tasks.refreshInbox() }
+        Store.scope.launch(Dispatchers.IO) {
+            Store.tasks.refresh()
+            Store.tasks.refreshInbox()
+            Store.tasks.backfillInboxMeta()   // 预览为空的条目补拉一次元数据（幂等，每进程每条目一次）
+        }
     }
 
     val active = tasks.filter { it.status == "queued" || it.status == "running" }
@@ -351,7 +355,7 @@ fun DownloadScreen() {
         val c = ios()
         ModalBottomSheet(
             onDismissRequest = { showMenu = false },
-            containerColor = if (c.isDark) Color(0xF20E1830) else Color(0xF7F4F8FE),
+            containerColor = if (c.isDark) Color(0xF20E1830) else Color(0xCDF4F8FE),
             scrimColor = Color(0x66000000),
         ) {
             Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, bottom = 30.dp)) {
@@ -389,7 +393,7 @@ private fun RowScope.FilterChip(label: String, selected: Boolean, onClick: () ->
             .then(
                 if (selected) Modifier.background(c.accent)
                 else Modifier.background(
-                    if (c.isDark) Color(0x14FFFFFF) else Color(0xB8FFFFFF))
+                    if (c.isDark) Color(0x14FFFFFF) else Color(0x20FFFFFF))
                     .border(1.dp, c.rim, RoundedCornerShape(100.dp)))
             .clickable { onClick() }
             .padding(vertical = 7.dp),
@@ -431,12 +435,23 @@ private fun InboxCard(
             Box(Modifier.size(72.dp).clip(RoundedCornerShape(12.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant)
                 .border(1.dp, ios().rim, RoundedCornerShape(12.dp))) {
-                if (item.previewUrl.isNotBlank()) AsyncImage(
-                    model = item.previewUrl, contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    imageLoader = Store.imageLoader, modifier = Modifier.fillMaxSize())
-                else Text("▦", modifier = Modifier.align(Alignment.Center),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 18.sp)
+                // 加载失败（URL 失效 / 超时 / 无网络）也要退回 ▦ 占位：
+                // 旧实现只在 previewUrl 为空时显示占位，加载失败会留下一个看不出所以然的空白方块
+                // 渲染期再过一次缩略归一：库里旧数据存的是原图 URL（name=orig，数 MB），
+                // 不归一的话经代理必然拉不动 → 预览空白；新入库的已在写入时归一。
+                val previewSrc = remember(item.previewUrl) { previewThumbUrl(item.previewUrl) }
+                var previewFailed by remember(item.previewUrl) { mutableStateOf(false) }
+                if (previewSrc.isNotBlank() && !previewFailed) {
+                    AsyncImage(
+                        model = previewSrc, contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        imageLoader = Store.imageLoader,
+                        onError = { previewFailed = true },
+                        modifier = Modifier.fillMaxSize())
+                } else {
+                    Text("▦", modifier = Modifier.align(Alignment.Center),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 18.sp)
+                }
                 if (item.mediaCount > 1)
                     Text("×${item.mediaCount}",
                         modifier = Modifier.align(Alignment.BottomEnd)
@@ -568,8 +583,9 @@ private fun TaskRow(t: TaskItem) {
             Spacer(Modifier.width(6.dp))
             TextButton(onClick = { Store.openUrl(t.url) },
                 contentPadding = PaddingValues(4.dp)) { Text("↗") }
-            TextButton(onClick = { Store.tasks.retry(t.id) },
-                contentPadding = PaddingValues(4.dp)) { Text("↻") }
+            if (t.status == "error" || t.status == "done" || t.status == "partial" || t.status == "canceled")
+                TextButton(onClick = { Store.tasks.retry(t.id) },
+                    contentPadding = PaddingValues(4.dp)) { Text("↻") }
             TextButton(onClick = { Store.tasks.delete(t.id) },
                 contentPadding = PaddingValues(4.dp)) { Text("🗑") }
         }

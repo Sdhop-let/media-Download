@@ -1,18 +1,17 @@
 # 媒体下载器 · 接手文档（Handoff）
 
 > 最后更新：2026-09-06 · Android v1.1（com.ep.donwnloader）
-> 配套文档：[TASKS.md](TASKS.md) 是权威任务流水账（M0–M9 全部批次与实测记录），本文档讲"怎么接"。
+> 配套文档：[TASKS.md](TASKS.md) 是权威任务流水账（M6–M9 全部批次与实测记录），本文档讲"怎么接"。
 
 ---
 
 ## 1. 项目概览
 
-本项目是一套社交媒体媒体下载器，包含两端：
+本项目是一套社交媒体媒体下载器（Android 原生应用，单端）：
 
 | 端 | 位置 | 技术栈 | 状态 |
 |---|---|---|---|
-| **Android App（主力）** | `android-app/` | Kotlin 2.0.21 + Jetpack Compose (BOM 2024.12.01) + AGP 8.7.3 / Gradle 8.9 | 功能完整，持续迭代 |
-| PC 桌面版（前身） | 根目录 `backend/` `run_server.py` `start.bat` | Python 3.14 + FastAPI(8765) + SQLite(WAL) + gallery-dl + Vue3（vendored 无构建） | 可用，功能已被 Android 端覆盖大半 |
+| **Android App** | `android-app/` | Kotlin 2.0.21 + Jetpack Compose (BOM 2024.12.01) + AGP 8.9.1 / Gradle 8.9 | 功能完整，持续迭代 |
 
 包名 `com.ep.donwnloader`（用户原始拼写，**不要改**）。APK 产物：`android-app/app/build/outputs/apk/debug/app-debug.apk`。
 
@@ -218,7 +217,7 @@ fun XxxScreen() {
 | | Clash 配置导入（文件/粘贴/URL，http/socks5；base64 订阅解码） | ✅ 加密协议节点跳过 |
 | 设置 | Cookie 折叠块、分享自动下载开关、主题/莫奈取色、支持范围/关于 | ✅ |
 | 账号登入 | ~~浏览器登录回显账号~~ | 已移除（浏览器无法回传 Cookie，不可行） |
-| 内嵌 yt-dlp | T8.8 已实施（Chaquopy 16.0.0，APK 55.8MB） | ✅ 降级通道已接，真机待验 |
+| 内嵌 yt-dlp | T8.8 已实施（Chaquopy **16.1.0**，APK ~57MB） | ✅ 降级通道已接；真机实测 `YtDlp: warmup ok` |
 
 ---
 
@@ -228,7 +227,7 @@ fun XxxScreen() {
 2. **去重三层**：收件箱按 URL、media 按 (post, index) 唯一约束、本地导入/重扫按 source_url 判重。
 3. **代理优选**：候选评分=速度÷(1+延迟/300)；全挂时 20 秒激进重试，正常按间隔全量复测并自动切换（Toast+日志告知）；Clash 导入节点持久化在 prefs，每次检测自动重建候选（`clearCandidates` 不会丢）。
 4. **体验**：分享零点击直达下载（可开关）；剪贴板前台自动捕获；收件箱卡片预览图（DB v3 preview_url）；视频抽帧缩略图；图片查看器/播放器全屏 Dialog（修过非全屏 bug）；长按批量删除走回收站（可恢复，不误伤）。
-5. **性能/体积**：无导航库、无 DI、无冗余依赖；Coil 单例走代理路由；缩略图与封面本地缓存；PC 端 Vue vendored 无构建。
+5. **性能/体积**：无导航库、无 DI、无冗余依赖；Coil 单例走代理路由；缩略图与封面本地缓存。
 6. **稳定性教训（已固化进代码）**：Compose tab 切换销毁 remember → 草稿提升到 Store；`detectAndTest` 会清空候选表 → 导入节点放 prefs 每次重建；Dialog 全屏必须关 platformDefaultWidth。
 7. **Cookie 容器登录（2026-09-08）**：CookieLoginActivity 内嵌 WebView 登录 X/IG，CookieManager 轮询抓取（HttpOnly 可见），自动转填 prefs 喂 yt-dlp，替代手动 DevTools 抠 cookie。**大坑**：Compose `AndroidView` 承载 WebView 时 x.com 的 percentage/vh 高度全链解析为 0（html{height:100%} computed 0px 而 window.innerHeight 正常，CDP 实测），IG 因布局路径不同幸免——换传统 View 体系（setContentView）同一 WebView 完整渲染，**WebView 容器页一律用 View 体系，勿用 Compose AndroidView**。键盘双坑：登录页 autofocus 自动弹键盘 + adjustResize 压扁页面 → `adjustPan|stateHidden` + onPageFinished 后 600/1800ms 双连收。UA：X/IG 都用桌面 Chrome UA。排查工具：`adb forward tcp:9222 localabstract:webview_devtools_remote_<pid>` + CDP Runtime.evaluate 直查 DOM 布局。
 8. **莫奈取色重构（2026-09-09，多点位采样 + 重启即取色 + 模拟器实测修正）**：背景——ColorOS 16 引擎壁纸 `getWallpaperColors` 不可靠；`dynamicColorScheme(ctx)` 在 Android 15+ 依赖系统已生成的 wallpaper color cache，重启后未就绪时返回默认值（"重启后取色失效"）；`getWallpaperFile` 读原图需 MANAGE_EXTERNAL_STORAGE（多数用户不授权，旧深路径实际不可用）。**实测修正（模拟器 Android 15）**：`WallpaperManager.getDrawable()` 抛 `SecurityException: READ_EXTERNAL_STORAGE denied`——**壁纸位图对应用受系统保护，非免权限，勿再用**；免权限取色唯一可靠来源是 `getWallpaperColors()` 三主色（Android 12+ 原生，本身即系统多点采样结果）。改法：①**双档深路径**——有 MANAGE_EXTERNAL_STORAGE：`getWallpaperFile` 原图 → 自研多点采样（全局 `QuantizerCelebi`(128) + `Score.score(…,10)` × 4×4 分块块主导色 → HCT 过滤 chroma≥6/tone 8..94 + hue 15° 分槽去重）；无权限：`getWallpaperColors` 三色直接作三 seed；②**三 seed 120° 均分窗口**——primary=Score 首位（系统取色直觉）；secondary/tertiary 以 primary 为基准 +120°/+240° 目标 hue 的 ±30° 窗口内选 chroma 最高壁纸真实色，窗口空才数学派生（保和谐又鲜活）；③**三 seed 独立派生**——各自 `TonalPalette`（S/T 彩度 ×0.85），比旧 SchemeTonalSpot 单 seed hue 偏移更鲜活；④**持久化缓存 + 门控**——SharedPreferences(`monet_seeds`) 存 `wp_id + 三 seed`，`quickResolve` 主线程首帧读缓存零解码零量化（重启后 ~2.8s 即取色，实测 cold start `source=cache`）；`deepResolve` 每次重采样但**hue 差异均 ≤15° 跳过写盘**（省电）。**验证**：模拟器 Android 15 全链路通（colors3 免权限 → cache 冷启动 → skip write 门控）；JVM 用多彩壁纸（蓝/紫红/橙/绿）跑真实算法：三 seed 命中壁纸真实区域色、hue 间隔 136°/134°/90°（≈120° 均分）、chroma 50-68 鲜活；UI 截图确认蓝紫灰调（该壁纸色系）贯穿状态栏/卡片/胶囊/分段控件。ColorOS 引擎壁纸实机行为仍需真机复核。
@@ -273,11 +272,12 @@ adb install -r D:\AndroidDev\build-epdownloader\app\outputs\apk\debug\app-debug.
 ### 9.1 T8.8 Chaquopy 构建专项坑（2026-09-07 血泪实录，改 Python 依赖前必读）
 
 1. **绝对不要给 chaquopy 配 `pip { install(...) }`**：构建期 pip --target 解压数千小文件后，联想安全软件反勒索启发式会把 buildPython venv 的 python.exe **挂死不退出**（jstack 证据：TaskBuilder.execBuildPython 在 ProcessImpl.waitFor 永久等待；换 C 盘/D 盘都一样；手动跑官方 D:\Python312\python.exe 的 pip 正常退出）。**新 Python 依赖 = 手动 pip install --target 到临时目录，再把纯 Python 源码拷进 src/main/python/**（二进制依赖需 Chaquopy 有对应 Android wheel，另议）。
-2. **Chaquopy Maven 组件（target/runtime）在阿里云镜像缺失，回源 mavenCentral 被 GFW 卡死**（表现为 Gradle 无限等待无 TCP）。已手动镜像 target-3.12.12-0 + runtime 16.0.0 全套到 `D:\AndroidDev\maven-local`，settings.gradle.kts 两处仓库列表**置顶**本地镜像。升级 Chaquopy 版本需重新跑 `android-app/mirror_chaquopy.py`。
+2. **Chaquopy Maven 组件（target/runtime）在阿里云镜像缺失，回源 mavenCentral 被 GFW 卡死**（表现为 Gradle 无限等待无 TCP）。已手动镜像 target-3.12.12-0 / 3.12.15-0 + runtime **16.1.0** 全套到 `D:\AndroidDev\maven-local`，settings.gradle.kts 两处仓库列表**置顶**本地镜像。升级 Chaquopy 版本需重新跑 `android-app/mirror_chaquopy.py`（脚本内的版本号与代理端口要同步改，当前代理 7890）。注意：**gradle 插件本体不在镜像内**——aliyun central 有，可正常解析。
 3. buildPython 用 **D:\Python312\python.exe**（本机 3.13/3.14 不受支持）；Kotlin DSL 写法 `buildPython = listOf("D:/Python312/python.exe")`（是 List，赋 String 编译错）。
 4. **构建目录迁到 D:\AndroidDev\build-epdownloader**（app/build.gradle.kts `layout.buildDirectory`）：APK 产物路径随之改变，CI/脚本别再找项目内 app/build。
 5. yt-dlp 打包形态：`assets/chaquopy/app.imy`（zip 容器，含 engine.pyc + yt_dlp 1083 pyc + socks.pyc）；stdlib 在 `stdlib-common.imy`/`stdlib-<abi>.imy`；cacert.pem 由 Chaquopy 提供。验证打包用 python zipfile 读 APK。
 6. pip 的 `--target` 模式**没有** "already satisfied" 检查，预装目录挡不住重装——别在这条路上浪费时间。
+7. **16 KB 页对齐（2026-10-15 修复）**：Android 16+ 启动时会弹系统「Android 应用兼容性」告警，点名 `libssl_chaquopy.so` / `libcrypto_chaquopy.so` / `libsqlite3_chaquopy.so` —— 这三个是 3688 字节的 stub 库，`p_align` 只有 4 KB。**必须升级到 Chaquopy ≥ 16.1.0**（上游 #1324 把它们改为 16 KB 链接）。**改 ELF 的 `p_align` 无效**：三段 LOAD 的 `(vaddr-off)%16384` 分别是 0/4096/8192，不满足对齐的同余要求，只能重新链接。校验方法：读 APK 内 `lib/*/*.so` 的 ELF64 program header，取 PT_LOAD 的 `p_align` 最小值，须 ≥ 16384（用 Python + zipfile 在内存里读，比 unzip 到磁盘快得多）。
 
 ---
 

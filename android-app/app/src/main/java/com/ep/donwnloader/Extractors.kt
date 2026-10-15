@@ -157,8 +157,9 @@ object Extractors {
         return PostMeta(
             platform = "twitter", postId = tweet.optString("id", tid),
             postUrl = tweet.optString("url", "https://x.com/$h/status/$tid"),
-            createdAt = toIso(tweet.optJSONObject("created_timestamp")?.toString()
-                ?: tweet.optString("created_at")),
+            createdAt = toIso(
+                tweet.optLong("created_timestamp", 0L).takeIf { it > 0 }?.toString()
+                    ?: tweet.optString("created_at")),
             text = tweet.optString("text"), author = author, media = media)
     }
 

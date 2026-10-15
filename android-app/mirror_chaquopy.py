@@ -1,5 +1,9 @@
-"""镜像 Chaquopy 16.0.0 运行时组件到本地 Maven 仓库（绕开 GFW 黑洞）。
-下载源经 Clash 7897 代理；输出目录 D:/AndroidDev/maven-local。
+"""镜像 Chaquopy 16.1.0 运行时组件到本地 Maven 仓库（绕开 GFW 黑洞）。
+下载源经 Clash 7890 代理；输出目录 D:/AndroidDev/maven-local。
+
+2026-10-15：16.0.0 → 16.1.0。原因：16.1.0 起 _chaquopy 的 OpenSSL/SQLite stub 库
+改为 16 KB 页对齐（上游 #1324），修复 Android 16+ 的「应用兼容性」弹窗。
+gradle 插件本身不在此镜像内（aliyun central 有），只有 target/runtime 需要本地镜像。
 """
 import os
 import re
@@ -7,7 +11,7 @@ import urllib.request
 
 BASE = "https://repo.maven.apache.org/maven2/com/chaquo/python"
 LOCAL = r"D:/AndroidDev/maven-local/com/chaquo/python"
-PROXY = {"https": "http://127.0.0.1:7897", "http": "http://127.0.0.1:7897"}
+PROXY = {"https": "http://127.0.0.1:7890", "http": "http://127.0.0.1:7890"}
 opener = urllib.request.build_opener(urllib.request.ProxyHandler(PROXY))
 urllib.request.install_opener(opener)
 
@@ -68,8 +72,8 @@ def mirror_dir(group_dir, version):
         fetch(url + name, os.path.join(LOCAL, group_dir, version, name))
 
 
-def latest_version(group_dir, prefer="16.0.0"):
-    """列组件全部版本；优先精确 16.0.0，否则取最高版本。"""
+def latest_version(group_dir, prefer="16.1.0"):
+    """列组件全部版本；优先精确 16.1.0，否则取最高版本。"""
     url = f"{BASE}/{group_dir}/"
     vs = [v.rstrip("/") for v in entries(url)
           if not v.startswith("maven-metadata")]
@@ -82,15 +86,16 @@ def latest_version(group_dir, prefer="16.0.0"):
 
 def main():
     os.makedirs(LOCAL, exist_ok=True)
-    # target：3.12 系列（镜像最新版 3.12.12-0；如插件选别的版本，报错后补）
-    for v in ["3.12.12-0"]:
+    # target：3.12 系列（3.12.12-0 已在用；顺带备 3.12.15-0，
+    # 防新版插件默认挑最新 3.12 时回源被 GFW 卡死）
+    for v in ["3.12.12-0", "3.12.15-0"]:
         mirror_dir("target", v)
     for f in ["maven-metadata.xml", "maven-metadata.xml.sha1"]:
         try:
             fetch(f"{BASE}/target/{f}", os.path.join(LOCAL, "target", f))
         except Exception as e:
             print("metadata skip:", e)
-    # runtime：五个组件，各取 16.0.0（无则最新版）
+    # runtime：五个组件，各取 16.1.0（无则最新版）
     for comp in ["runtime/bootstrap", "runtime/chaquopy", "runtime/chaquopy_android",
                  "runtime/chaquopy_java", "runtime/libchaquopy_java"]:
         try:
