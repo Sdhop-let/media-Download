@@ -1,6 +1,5 @@
 package com.ep.donwnloader
 
-import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -20,18 +19,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsControllerCompat
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
     private val notifPerm = registerForActivityResult(
@@ -47,8 +44,6 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         isForeground = true
-        // 兜底：换壁纸（尤其厂商引擎壁纸不发 colorsChanged）后回前台强制重算取色
-        if (android.os.Build.VERSION.SDK_INT >= 31) Store.monetEpoch.intValue++
         // 剪贴板捕获：前台时检测到平台链接自动收进收件箱
         try {
             val cm = getSystemService(android.content.ClipboardManager::class.java)
@@ -56,7 +51,7 @@ class MainActivity : ComponentActivity() {
             if (text == lastClip || text == Store.draftInput.value) return
             if (Extractors.detect(text) == null) return
             lastClip = text
-            Store.scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            Store.scope.launch(Dispatchers.IO) {
                 val (added, _) = Store.tasks.capture(listOf(text))
                 if (added > 0) {
                     Store.tasks.toast.value = "检测到剪贴板链接，已捕获到收件箱"
@@ -75,7 +70,6 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         Store.init(this)
-        registerWallpaperColorListener()
         if (android.os.Build.VERSION.SDK_INT >= 33 &&
             checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
             android.content.pm.PackageManager.PERMISSION_GRANTED) {
@@ -83,64 +77,19 @@ class MainActivity : ComponentActivity() {
         }
         setContent { DownloaderApp() }
     }
-
-    /** 壁纸取色实时监听（API 31+）：静态/live 壁纸 colors 变化 → epoch 自增 → 全 UI 重算取色。
-     *  回调后 350ms/1200ms 两次自增：SystemUI 主题 overlay 打入有亚秒延迟，兜底刷新。 */
-    private fun registerWallpaperColorListener() {
-        if (android.os.Build.VERSION.SDK_INT < 31) return
-        try {
-            val wm = getSystemService(android.app.WallpaperManager::class.java)
-            if (wm == null) { android.util.Log.w("MonetEpoch", "WallpaperManager null, listener not registered"); return }
-            val handler = android.os.Handler(android.os.Looper.getMainLooper())
-            wm.addOnColorsChangedListener({ colors, which ->
-                android.util.Log.i("MonetEpoch", "onColorsChanged which=$which wc=${colors?.primaryColor}")
-                if (which and android.app.WallpaperManager.FLAG_SYSTEM != 0) {
-                    Store.monetEpoch.intValue++
-                    handler.postDelayed({ Store.monetEpoch.intValue++ }, 350)
-                    handler.postDelayed({ Store.monetEpoch.intValue++ }, 1200)
-                }
-            }, handler)
-            android.util.Log.i("MonetEpoch", "wallpaper color listener registered")
-        } catch (e: Exception) {
-            android.util.Log.w("MonetEpoch", "register failed: $e")
-        }
-    }
 }
 
 @Composable
 fun DownloaderApp() {
     val ctx = LocalContext.current
-    // 主题解析：设置页可切 跟随系统 / 浅色 / 深色
+    // 主题解析：设置页可切 跟随系统 / 浅色 / 深色；强调色由种子色（默认 Edqiu 深蓝）派生
     val dark = when (Store.themeMode) {
         "dark" -> true
         "light" -> false
         else -> isSystemInDarkTheme()
     }
-    val baseC = if (dark) MonetDark else MonetLight
-    // 壁纸取色版本号：壁纸 colors 变化 / 回前台时自增，作为 remember key 驱动重算
-    val monetEpoch = Store.monetEpoch.intValue
-    // 派生优先级：莫奈动态取色（Android 12+，壁纸文件自取色 > 壁纸 colors > 系统值）> 种子色 > 默认
-    val dynamicOn = Store.dynamicColor && Build.VERSION.SDK_INT >= 31
-    // 快速首帧（主线程安全）：系统 scheme / WallpaperColors 直取
-    val quick = if (dynamicOn) {
-        remember(monetEpoch, dark, Store.dynamicScope) { MonetResolver.quickResolve(ctx, dark) }
-    } else null
-    // 深度取色（IO 线程）：读壁纸文件量化 + ColorSpec 2025 派生；epoch 变化 / 回前台重算
-    var deep by remember { mutableStateOf<MonetResolved?>(null) }
-    LaunchedEffect(monetEpoch, dark, dynamicOn) {
-        if (dynamicOn) deep = withContext(Dispatchers.IO) { MonetResolver.deepResolve(ctx, dark) }
-    }
-    val resolved = if (dynamicOn) (deep ?: quick) else null
-    val dynScheme = resolved?.sysScheme
-    val c = if (resolved != null) {
-        ThemeDerive.fromDynamic(baseC, resolved.primary, resolved.secondary,
-            resolved.tertiary, Store.dynamicScope)
-    } else {
-        val seed = Store.accentSeedColor()
-        if (seed != null) ThemeDerive.fromSeed(baseC, seed, Store.dynamicScope) else baseC
-    }
-    // M3 scheme：系统色可信且 accent 作用域时直用系统值，否则由派生色生成（玻璃令牌同步换肤）
-    val scheme = if (dynScheme != null && Store.dynamicScope == "accent") dynScheme else monetScheme(c)
+    val c = EqTheme.resolve(dark, Store.accentSeedColor())
+    val scheme = eqScheme(c)
 
     LaunchedEffect(dark) {
         // 状态栏/导航栏图标明暗跟随当前主题
@@ -169,28 +118,46 @@ fun DownloaderApp() {
         }
     }
 
-    CompositionLocalProvider(LocalMonet provides c) {
+    CompositionLocalProvider(LocalEq provides c) {
         MaterialTheme(colorScheme = scheme) {
             // tab 提升到 Store（跨页共享：素材库空状态「去下载页」引导跳转）
             val tab = Store.selectedTab
-            val labels = listOf("下载", "素材库", "代理", "设置")
+            val labels = listOf("收件箱", "素材库", "代理", "设置")
+            // 磨砂强度 → 可见背景层柔化半径（Edqiu AppNav 同式：frost² × 64dp，0.6 → 23dp）
+            val frost = ThemeEffects.GlassFrostStrength.current
+            val stageBlur = (frost * frost * 64f).dp
 
-            GlassBackground(Modifier.fillMaxSize()) {
+            // 页面内容捕获链：底栏（链外）采样它折射「正下方滚动的内容」；
+            // 链内卡片只采样舞台链（LocalStageBackdrop），无递归捕获（SIGSEGV 铁律）
+            val shellBackdrop = rememberLayerBackdrop {
+                drawRect(c.bg)
+                drawContent()
+            }
+
+            StageBackground(Modifier.fillMaxSize(), blurRadius = stageBlur) {
                 Box(
                     Modifier.fillMaxSize()
                         .padding(WindowInsets.statusBars.asPaddingValues())
                 ) {
-                    when (tab) {
-                        0 -> DownloadScreen()
-                        1 -> LibraryScreen()
-                        2 -> ProxyScreen()
-                        else -> SettingsScreen()
+                    CompositionLocalProvider(LocalAppBackdrop provides shellBackdrop) {
+                        Box(
+                            Modifier.fillMaxSize()
+                                .layerBackdrop(shellBackdrop)
+                        ) {
+                            when (tab) {
+                                0 -> DownloadScreen()
+                                1 -> LibraryScreen()
+                                2 -> ProxyScreen()
+                                else -> SettingsScreen()
+                            }
+                        }
                     }
                 }
+                // 底栏整体上移：完整避开手势条区域，50dp 高全可见；真折射采样页面内容
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
                     GlassTabBar(labels, tab,
                         modifier = Modifier.windowInsetsPadding(WindowInsets.navigationBars)
-                            .padding(start = 12.dp, end = 12.dp, bottom = 8.dp)) { Store.selectedTab = it }
+                            .padding(bottom = 10.dp)) { Store.selectedTab = it }
                 }
             }
         }

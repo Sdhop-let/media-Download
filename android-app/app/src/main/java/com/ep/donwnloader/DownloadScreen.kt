@@ -6,6 +6,9 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
@@ -45,6 +48,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -78,7 +83,7 @@ private fun inboxStatusColor(s: String) = when (s) {
 
 @Composable
 private fun platColor(p: String) = when (p) {
-    "twitter" -> ios().text; "instagram" -> IgColor; "bluesky" -> BsColor; else -> ios().faint
+    "twitter" -> eq().text; "instagram" -> IgColor; "bluesky" -> BsColor; else -> eq().faint
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -139,31 +144,15 @@ fun DownloadScreen() {
         contentPadding = PaddingValues(16.dp, 6.dp, 16.dp, 124.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        // 顶部：左「捕获」/ 中标题 / 右「下载」对称布局
+        // 顶部：左「任务」/ 中标题 / 右「下载」对称布局（捕获键已删——App 是全自动捕获，
+        // 粘贴入口移到右下角悬浮 ＋）
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                GlassButton("＋ 捕获", onClick = {
-                    when {
-                        !pasteOpen -> {
-                            pasteOpen = true
-                            // 展开粘贴区的同时，自动捕获剪贴板里的链接
-                            scope.launch(Dispatchers.IO) {
-                                val clip = runCatching {
-                                    ctx.getSystemService(android.content.ClipboardManager::class.java)
-                                        .primaryClip?.getItemAt(0)?.text?.toString()
-                                }.getOrNull().orEmpty()
-                                val urls = ShareIn.extractLinks(clip)
-                                if (urls.isNotEmpty()) {
-                                    val r = Store.tasks.capture(urls)
-                                    Store.tasks.toast.value = "已从剪贴板捕获 ${r.added} 条" +
-                                        if (r.dup > 0) "，${r.dup} 条重复跳过" else ""
-                                }
-                            }
-                        }
-                        input.isNotBlank() -> captureText(input, collapse = true)
-                        else -> pasteOpen = false
-                    }
-                }, modifier = Modifier.width(88.dp))
+                GlassButton(
+                    if (showTasks) "◂ 收件箱" else if (active.isEmpty()) "任务" else "任务 ${active.size}",
+                    onClick = { showTasks = !showTasks },
+                    kind = if (showTasks) ButtonKind.Primary else ButtonKind.Ghost,
+                    modifier = Modifier.width(88.dp))
                 Text("收件箱", textAlign = TextAlign.Center,
                     fontWeight = FontWeight.Bold, fontSize = 20.sp,
                     modifier = Modifier.weight(1f))
@@ -214,30 +203,6 @@ fun DownloadScreen() {
                 }
             }
         }
-        // 任务与历史：满长胶囊 tab，点击进入/收起任务页（primary 低透明底，随莫奈/种子色取色）
-        item {
-            val c = ios()
-            Box(
-                Modifier.fillMaxWidth()
-                    .clip(RoundedCornerShape(100.dp))
-                    .background(c.primary.copy(alpha = if (c.isDark) 0.26f else 0.12f))
-                    .border(1.dp, c.primary.copy(alpha = if (c.isDark) 0.35f else 0.18f),
-                        RoundedCornerShape(100.dp))
-                    .clickable { showTasks = !showTasks }
-                    .padding(horizontal = 18.dp, vertical = 12.dp),
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("任务与历史", fontSize = 13.5.sp,
-                        fontWeight = FontWeight.Bold, color = c.text)
-                    Spacer(Modifier.weight(1f))
-                    Text("进行中 ${active.size} · 历史 ${history.size}",
-                        fontSize = 11.sp, color = c.faint,
-                        modifier = Modifier.padding(end = 8.dp))
-                    Text(if (showTasks) "▾" else "▸", fontSize = 13.sp, color = c.text2)
-                }
-            }
-        }
-
         if (showTasks) {
             // 任务子页：进行中 + 历史任务
             item {
@@ -328,7 +293,7 @@ fun DownloadScreen() {
         ) {
             val pulse = donePulse
             if (pulse != null) {
-                val c = ios()
+                val c = eq()
                 Row(
                     Modifier.clip(RoundedCornerShape(100.dp))
                         .background(c.primary.copy(alpha = if (c.isDark) 0.30f else 0.16f))
@@ -348,11 +313,54 @@ fun DownloadScreen() {
                 }
             }
         }
+
+        // 悬浮 ＋（Edqiu 同款圆角方块主操作）：展开粘贴区并自动捕获剪贴板；粘贴区/批量选择时隐藏
+        AnimatedVisibility(
+            visible = !pasteOpen && !selectMode,
+            enter = scaleIn(spring(dampingRatio = 0.6f, stiffness = 500f)) + fadeIn(),
+            exit = scaleOut(targetScale = 0.8f) + fadeOut(),
+            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 18.dp, bottom = 112.dp),
+        ) {
+            val c = eq()
+            Box(
+                Modifier.size(56.dp)
+                    .shadow(10.dp, RoundedCornerShape(19.dp),
+                        ambientColor = Color.Black.copy(alpha = if (c.isDark) 0.40f else 0.18f),
+                        spotColor = c.glow)
+                    .clip(RoundedCornerShape(19.dp))
+                    .background(Brush.linearGradient(listOf(c.primaryA, c.primary, c.primaryDeep)))
+                    .clickable {
+                        when {
+                            !pasteOpen -> {
+                                pasteOpen = true
+                                // 展开粘贴区的同时，自动捕获剪贴板里的链接
+                                scope.launch(Dispatchers.IO) {
+                                    val clip = runCatching {
+                                        ctx.getSystemService(android.content.ClipboardManager::class.java)
+                                            .primaryClip?.getItemAt(0)?.text?.toString()
+                                    }.getOrNull().orEmpty()
+                                    val urls = ShareIn.extractLinks(clip)
+                                    if (urls.isNotEmpty()) {
+                                        val r = Store.tasks.capture(urls)
+                                        Store.tasks.toast.value = "已从剪贴板捕获 ${r.added} 条" +
+                                            if (r.dup > 0) "，${r.dup} 条重复跳过" else ""
+                                    }
+                                }
+                            }
+                            input.isNotBlank() -> captureText(input, collapse = true)
+                            else -> pasteOpen = false
+                        }
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("＋", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Medium)
+            }
+        }
     }
 
     // 下载菜单：全部下载 / 批量下载
     if (showMenu) {
-        val c = ios()
+        val c = eq()
         ModalBottomSheet(
             onDismissRequest = { showMenu = false },
             containerColor = if (c.isDark) Color(0xF20E1830) else Color(0xCDF4F8FE),
@@ -385,13 +393,13 @@ fun DownloadScreen() {
 /** 状态筛选胶囊：五个一行等宽压缩版。 */
 @Composable
 private fun RowScope.FilterChip(label: String, selected: Boolean, onClick: () -> Unit) {
-    val c = ios()
+    val c = eq()
     Box(
         Modifier
             .weight(1f)
             .clip(RoundedCornerShape(100.dp))
             .then(
-                if (selected) Modifier.background(c.accent)
+                if (selected) Modifier.background(c.primary)
                 else Modifier.background(
                     if (c.isDark) Color(0x14FFFFFF) else Color(0x20FFFFFF))
                     .border(1.dp, c.rim, RoundedCornerShape(100.dp)))
@@ -421,8 +429,8 @@ private fun InboxCard(
                 Box(
                     Modifier.size(24.dp).clip(CircleShape)
                         .then(
-                            if (selected) Modifier.background(ios().accent)
-                            else Modifier.border(1.5.dp, ios().faint, CircleShape))
+                            if (selected) Modifier.background(eq().accent)
+                            else Modifier.border(1.5.dp, eq().faint, CircleShape))
                         .clickable { onToggle() },
                     contentAlignment = Alignment.Center,
                 ) {
@@ -431,10 +439,9 @@ private fun InboxCard(
                 }
                 Spacer(Modifier.width(10.dp))
             }
-            // 左列：媒体预览图（小正方形主视觉，×N 角标）
-            Box(Modifier.size(72.dp).clip(RoundedCornerShape(12.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant)
-                .border(1.dp, ios().rim, RoundedCornerShape(12.dp))) {
+            // 左列：媒体预览图（Edqiu 链接卡主视觉：大圆角缩略 + 右下角头像气泡 + ×N 角标）
+            Box(Modifier.size(84.dp).clip(RoundedCornerShape(20.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant)) {
                 // 加载失败（URL 失效 / 超时 / 无网络）也要退回 ▦ 占位：
                 // 旧实现只在 previewUrl 为空时显示占位，加载失败会留下一个看不出所以然的空白方块
                 // 渲染期再过一次缩略归一：库里旧数据存的是原图 URL（name=orig，数 MB），
@@ -450,67 +457,89 @@ private fun InboxCard(
                         modifier = Modifier.fillMaxSize())
                 } else {
                     Text("▦", modifier = Modifier.align(Alignment.Center),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 18.sp)
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 20.sp)
                 }
                 if (item.mediaCount > 1)
                     Text("×${item.mediaCount}",
-                        modifier = Modifier.align(Alignment.BottomEnd)
+                        modifier = Modifier.align(Alignment.TopStart).padding(6.dp)
                             .background(Color(0x8C000000), RoundedCornerShape(6.dp))
                             .padding(horizontal = 4.dp, vertical = 1.dp),
                         color = Color.White, fontSize = 9.sp)
+                // 头像气泡（白描边圆，Edqiu 同款位置：缩略图右下角）
+                Box(Modifier.align(Alignment.BottomEnd).padding(5.dp).size(24.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .border(1.5.dp, Color.White, CircleShape)) {
+                    if (item.avatarUrl.isNotBlank()) AsyncImage(
+                        model = item.avatarUrl, contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        imageLoader = Store.imageLoader, modifier = Modifier.fillMaxSize())
+                    else Text(item.handle.take(1).uppercase().ifBlank { "?" },
+                        modifier = Modifier.align(Alignment.Center),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                }
             }
-            Spacer(Modifier.width(12.dp))
+            Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)
                 .then(if (selectMode) Modifier.clickable { onToggle() } else Modifier)) {
+                // 首行：作者名 + 状态胶囊（Edqiu 链接卡语言）
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    // 小头像（20dp）融入文字行：左列让位给预览图
-                    Box(Modifier.size(20.dp).clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.surfaceVariant)) {
-                        if (item.avatarUrl.isNotBlank()) AsyncImage(
-                            model = item.avatarUrl, contentDescription = null,
-                            contentScale = ContentScale.Crop,
-                            imageLoader = Store.imageLoader, modifier = Modifier.fillMaxSize())
-                        else Text(item.handle.take(1).uppercase().ifBlank { "?" },
-                            modifier = Modifier.align(Alignment.Center),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                    }
-                    Spacer(Modifier.width(5.dp))
-                    PlatBadge(item.platform)
-                    Spacer(Modifier.width(5.dp))
-                    Text(if (item.handle.isNotBlank()) "@${item.handle}" else shortUrl(item.url),
-                        fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                    Text(if (item.name.isNotBlank()) item.name
+                        else if (item.handle.isNotBlank()) "@${item.handle}" else shortUrl(item.url),
+                        fontSize = 14.sp, fontWeight = FontWeight.Bold, color = eq().text,
                         maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                    Spacer(Modifier.width(5.dp))
-                    Text(inboxStatusText(item.status),
-                        color = inboxStatusColor(item.status), fontSize = 10.sp)
+                    Spacer(Modifier.width(6.dp))
+                    Box(Modifier.background(inboxStatusColor(item.status).copy(alpha = 0.14f),
+                            RoundedCornerShape(100.dp))
+                        .padding(horizontal = 9.dp, vertical = 3.dp)) {
+                        Text(inboxStatusText(item.status),
+                            color = inboxStatusColor(item.status),
+                            fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+                // 次行：平台徽章 + @handle + 捕获时间
+                Row(verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(top = 3.dp)) {
+                    PlatBadge(item.platform)
+                    Spacer(Modifier.width(6.dp))
+                    Text(if (item.handle.isNotBlank()) "@${item.handle}" else shortUrl(item.url),
+                        fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = InfoColor,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Spacer(Modifier.width(8.dp))
+                    Text(fmtIso(item.capturedAt), fontSize = 10.sp, color = eq().faint,
+                        modifier = Modifier.weight(1f), textAlign = TextAlign.End)
                 }
                 if (item.text.isNotBlank()) {
-                    Text(item.text, fontSize = 10.sp, lineHeight = 13.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    Text(item.text, fontSize = 11.sp, lineHeight = 15.sp,
+                        color = eq().text2,
                         maxLines = 2, overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(top = 3.dp))
+                        modifier = Modifier.padding(top = 4.dp))
                 }
                 if (item.error.isNotBlank()) {
                     Text(item.error,
                         color = if (item.status == "failed") ErrColor
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                        else eq().faint,
                         fontSize = 10.sp, lineHeight = 13.sp,
-                        maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        maxLines = 2, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = 2.dp))
                 }
-                if (!selectMode) Row {
+                if (!selectMode) Row(modifier = Modifier.padding(top = 2.dp)) {
                     if (item.status == "captured" || item.status == "failed") {
                         TextButton(onClick = {
                             scope.launch(Dispatchers.IO) { Store.tasks.downloadInbox(listOf(item.id)) }
                         }, contentPadding = PaddingValues(horizontal = 6.dp)) {
-                            Text(if (item.status == "failed") "重试" else "下载")
+                            Text(if (item.status == "failed") "重试" else "下载",
+                                color = eq().primary, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         }
                     }
                     TextButton(onClick = { Store.openUrl(item.url) },
-                        contentPadding = PaddingValues(horizontal = 6.dp)) { Text("↗ 原帖") }
+                        contentPadding = PaddingValues(horizontal = 6.dp)) {
+                        Text("↗ 原帖", fontSize = 12.sp, color = eq().text2) }
                     TextButton(onClick = {
                         scope.launch(Dispatchers.IO) { Store.tasks.removeInbox(item.id) }
-                    }, contentPadding = PaddingValues(horizontal = 6.dp)) { Text("移除") }
+                    }, contentPadding = PaddingValues(horizontal = 6.dp)) {
+                        Text("移除", fontSize = 12.sp, color = eq().faint) }
                 }
             }
         }

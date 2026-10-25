@@ -249,7 +249,7 @@ fun LibraryScreen() {
                     StatCell("Bluesky", stats.byPlatform["bluesky"] ?: 0, Modifier.weight(1f))
                 }
                 Box(Modifier.padding(vertical = 8.dp).fillMaxWidth().height(1.dp)
-                    .background(ios().line.copy(alpha = 0.55f)))
+                    .background(eq().line.copy(alpha = 0.55f)))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     StatCell("图片", stats.byType["photo"] ?: 0, Modifier.weight(1f))
                     StatCell("视频", stats.byType["video"] ?: 0, Modifier.weight(1f))
@@ -557,7 +557,7 @@ fun copyLink(m: MediaItem) {
 /** 骨架屏：日期手风琴加载占位（组头条 + 两张帖子卡），呼吸明暗脉冲与流光进度同节奏。 */
 @Composable
 private fun SkeletonList() {
-    val c = LocalMonet.current
+    val c = LocalEq.current
     val trans = rememberInfiniteTransition(label = "sk")
     val a by trans.animateFloat(
         initialValue = 0.30f, targetValue = 0.70f,
@@ -583,7 +583,7 @@ private fun SkeletonList() {
 @Composable
 private fun StatCell(label: String, count: Int, modifier: Modifier = Modifier,
                      onClick: (() -> Unit)? = null) {
-    val c = ios()
+    val c = eq()
     Column(modifier.then(if (onClick != null) Modifier.clickable { onClick() } else Modifier),
         horizontalAlignment = Alignment.CenterHorizontally) {
         Text("$count", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = c.text)
@@ -595,7 +595,7 @@ private fun StatCell(label: String, count: Int, modifier: Modifier = Modifier,
 /** 等宽筛选胶囊（与下载页同款）。 */
 @Composable
 private fun RowScope.FilterChip(label: String, selected: Boolean, onClick: () -> Unit) {
-    val c = ios()
+    val c = eq()
     Box(
         Modifier
             .weight(1f)
@@ -619,7 +619,7 @@ private fun RowScope.FilterChip(label: String, selected: Boolean, onClick: () ->
 /** 吸顶日期分隔条：左「日期 · N 项」胶囊（近不透明玻璃底，滚动内容从其下方穿过不透字）+ 右侧渐隐细线。 */
 @Composable
 private fun DateStickyHeader(label: String, count: Int) {
-    val c = ios()
+    val c = eq()
     Row(
         Modifier.fillMaxWidth().padding(vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -648,7 +648,7 @@ private fun DateStickyHeader(label: String, count: Int) {
 /** 一级分类入口胶囊：「来源 · X ▸」形式——维度名 + 当前生效值 + 旋转箭头；展开时主色高亮。 */
 @Composable
 private fun RowScope.SectionChip(label: String, value: String, open: Boolean, onClick: () -> Unit) {
-    val c = ios()
+    val c = eq()
     val angle by animateFloatAsState(if (open) 90f else 0f, label = "secArrow")
     Box(
         Modifier
@@ -722,10 +722,10 @@ private fun AuthorAccordion(
                                 overflow = TextOverflow.Ellipsis)
                             Text("@${a.handle} · ${a.mediaCount} 项",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = ios().faint,
+                                color = eq().faint,
                                 maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
-                        Text("▸", fontSize = 13.sp, color = ios().faint,
+                        Text("▸", fontSize = 13.sp, color = eq().faint,
                             modifier = Modifier.padding(horizontal = 6.dp)
                                 .rotate(if (expanded) 90f else 0f))
                     }
@@ -733,7 +733,7 @@ private fun AuthorAccordion(
                         if (authorMedia.isEmpty()) {
                             Text("该作者暂无此类素材",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = ios().faint,
+                                color = eq().faint,
                                 modifier = Modifier.padding(start = 12.dp, bottom = 12.dp))
                         } else {
                             Column(Modifier.padding(start = 10.dp, end = 10.dp, bottom = 10.dp)) {
@@ -852,7 +852,7 @@ private fun rememberVideoCover(m: MediaItem): File? {
 fun MediaCell(m: MediaItem, selected: Boolean = false, onClick: () -> Unit,
               onLongClick: (() -> Unit)? = null) {
     val ctx = LocalContext.current
-    val c = ios()
+    val c = eq()
     val cover = rememberVideoCover(m)
     Box(
         Modifier.aspectRatio(1f).clip(RoundedCornerShape(14.dp))
@@ -912,7 +912,7 @@ private fun MediaSheet(
     onCopyLink: () -> Unit,
     onDeleted: () -> Unit,
 ) {
-    val c = LocalMonet.current
+    val c = LocalEq.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -994,7 +994,7 @@ private fun AuthorStatsSheet(
     onDismiss: () -> Unit,
     onOpenAuthor: (Long) -> Unit,
 ) {
-    val c = LocalMonet.current
+    val c = LocalEq.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val totalItems = rows.sumOf { it.mediaCount }
     val totalBytes = rows.sumOf { it.bytes }
@@ -1039,7 +1039,7 @@ private fun AuthorStatsSheet(
 /** 作者统计排行行：头像 + 名字/@handle·图视拆分 + 素材数/容量，下方主色占比条（榜首=满格）。 */
 @Composable
 private fun AuthorStatRowItem(r: AuthorStatRow, maxCount: Int, onClick: () -> Unit) {
-    val c = LocalMonet.current
+    val c = LocalEq.current
     Column(Modifier.fillMaxWidth()
         .clip(RoundedCornerShape(10.dp))
         .clickable(onClick = onClick)

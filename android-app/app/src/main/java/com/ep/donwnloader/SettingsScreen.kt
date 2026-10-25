@@ -75,7 +75,6 @@ fun SettingsScreen() {
     var maxBsky by remember { mutableStateOf(Store.prefs.maxBskyPosts.toString()) }
     var autoOpt by remember { mutableStateOf(Store.prefs.autoOptimize) }
     var interval by remember { mutableStateOf(Store.prefs.intervalMin.toString()) }
-    var dynColor by remember { mutableStateOf(Store.dynamicColor) }
     var shareAuto by remember { mutableStateOf(Store.prefs.shareAutoDownload) }
     var capsule by remember { mutableStateOf(Store.prefs.capsuleNotify) }
     var xCookieOpen by remember { mutableStateOf(false) }
@@ -108,6 +107,23 @@ fun SettingsScreen() {
     }
     BackHandler(enabled = syncPage) { syncPage = false }
     BackHandler(enabled = recycleOpen) { recycleOpen = false }
+
+    // 壁纸舞台选图（Edqiu L0）：拷贝进应用私有目录再引用，避免 SAF 临时 URI 失效
+    val wallPicker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) scope.launch(Dispatchers.IO) {
+            runCatching {
+                val dst = java.io.File(ctx.filesDir, "stage_wallpaper.jpg")
+                ctx.contentResolver.openInputStream(uri)?.use { input ->
+                    dst.outputStream().use { input.copyTo(it) }
+                } ?: return@launch
+                Store.prefs.stageWallpaper = dst.absolutePath
+                Store.stageWallpaper = dst.absolutePath
+                StageWallpaper.invalidate()
+                Store.tasks.toast.value = "壁纸舞台已更新"
+            }.onFailure { Store.tasks.toast.value = "壁纸保存失败：${it.message}" }
+        }
+    }
 
     if (syncPage) {
         SyncExternalScreen(onBack = { syncPage = false })
@@ -378,7 +394,7 @@ fun SettingsScreen() {
 
         // ══════════ 分组五：外观 ══════════
         item {
-            SettingsDirCard("appearance", "🎨", "外观", "主题 · 莫奈取色",
+            SettingsDirCard("appearance", "🎨", "外观", "主题 · 强调色 · 壁纸舞台",
                 openKey = openGroup, onToggle = { openGroup = it }) {
                 Column(Modifier.padding(top = 2.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     IosSegmented(
@@ -392,38 +408,35 @@ fun SettingsScreen() {
                         modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
                     )
                     RowDivider()
-                    SwitchRow("莫奈动态取色", "Android 12+ 跟随系统壁纸配色", dynColor) {
-                        // 运行时状态必须同步写：MainActivity 的派生分支读 Store.dynamicColor，
-                        // 只写 prefs 会导致关莫奈后仍走莫奈配色、自定义种子色被挡住
-                        dynColor = it
-                        Store.dynamicColor = it
-                        Store.prefs.dynamicColor = it
-                    }
-                    // 莫奈取色作用域：仅主色（现状）/ 全局跟随（背景与光斑同步派生）
-                    if (dynColor) {
-                        Column(Modifier.padding(start = 2.dp, top = 4.dp, bottom = 6.dp)) {
-                            Text("取色作用域", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                            Text("仅主色：按钮与选中态用壁纸色；全局跟随：背景渐变与光斑同步跟随壁纸",
-                                fontSize = 10.5.sp, lineHeight = 14.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(top = 1.dp))
-                            IosSegmented(
-                                options = listOf("仅主色", "全局跟随"),
-                                selected = if (Store.dynamicScope == "full") 1 else 0,
-                                onSelect = { i ->
-                                    val v = if (i == 1) "full" else "accent"
-                                    Store.dynamicScope = v
-                                    Store.prefs.dynamicScope = v
-                                },
-                                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
-                            )
+                    // 壁纸舞台（Edqiu L0 背景层）：默认极光色场 / 自选图片毛玻璃铺底
+                    Column(Modifier.padding(top = 4.dp, bottom = 2.dp)) {
+                        Text("壁纸舞台", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        Text("玻璃卡片下面的背景层：默认为强调色极光色场，选择图片后以毛玻璃壁纸铺满全局",
+                            fontSize = 10.5.sp, lineHeight = 14.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 1.dp, bottom = 6.dp))
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            GlassButton("默认极光", onClick = {
+                                scope.launch(Dispatchers.IO) {
+                                    runCatching {
+                                        java.io.File(ctx.filesDir, "stage_wallpaper.jpg").delete()
+                                        Store.prefs.stageWallpaper = ""
+                                        Store.stageWallpaper = ""
+                                        StageWallpaper.invalidate()
+                                    }
+                                }
+                            }, kind = if (Store.stageWallpaper.isBlank()) ButtonKind.Primary
+                                else ButtonKind.Ghost, modifier = Modifier.weight(1f))
+                            GlassButton("选择图片", onClick = { wallPicker.launch("image/*") },
+                                kind = if (Store.stageWallpaper.isNotBlank()) ButtonKind.Primary
+                                else ButtonKind.Ghost, modifier = Modifier.weight(1f))
                         }
                     }
                     RowDivider()
-                    // 主题颜色自定义（莫奈开启时让位给壁纸色）
+                    // 强调色：Edqiu 同款色板，点选即时换肤（HCT 派生，明暗两套）
                     Column(Modifier.padding(top = 4.dp, bottom = 2.dp)) {
-                        Text("主题颜色", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                        Text(if (dynColor) "莫奈取色开启时，自定义色暂不生效" else "点选种子色即时换肤，明暗两套自动派生",
+                        Text("强调色", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        Text("按钮、选中态与舞台色域随强调色实时变化",
                             fontSize = 10.5.sp, lineHeight = 14.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(top = 1.dp))
@@ -432,11 +445,11 @@ fun SettingsScreen() {
                             contentPadding = PaddingValues(vertical = 8.dp),
                         ) {
                             item {
-                                AccentDot("", "默认", Color(0xFF2F4C8F), disabled = dynColor)
+                                AccentDot("", "默认", Color(0xFF2F4C8F))
                             }
                             AccentPresets.forEach { (hex, name) ->
                                 item {
-                                    AccentDot(hex, name, parseSeedColor(hex), disabled = dynColor)
+                                    AccentDot(hex, name, parseSeedColor(hex))
                                 }
                             }
                         }
@@ -559,7 +572,7 @@ private fun UpdateDialog(
     currentVersion: String,
     onDismiss: () -> Unit,
 ) {
-    val c = ios()
+    val c = eq()
     val rel = release
     val versionOrder = rel?.let { UpdateChecker.compare(it.tag, currentVersion) } ?: 0
     val newer = rel != null && versionOrder > 0
@@ -663,7 +676,7 @@ private fun CollapseRow(title: String, subtitle: String, open: Boolean, onToggle
 @Composable
 private fun RowDivider() {
     Box(Modifier.fillMaxWidth().padding(vertical = 1.dp)
-        .height(1.dp).background(ios().line.copy(alpha = 0.55f)))
+        .height(1.dp).background(eq().line.copy(alpha = 0.55f)))
 }
 
 /** 开关行：标题 + 说明 + 尾部开关（统一字号体系：13sp / 10.5sp）。 */
@@ -698,7 +711,7 @@ private fun SettingsDirCard(
     onToggle: (String) -> Unit,
     content: @Composable () -> Unit,
 ) {
-    val c = ios()
+    val c = eq()
     val open = openKey == key
     GlassCard {
         Column {
@@ -738,7 +751,7 @@ private fun SettingsDirCard(
 /** 支持范围小胶囊：fill 底 + 细描边，紧凑字号。 */
 @Composable
 private fun SupportTag(text: String) {
-    val c = ios()
+    val c = eq()
     Text(text, fontSize = 10.5.sp, lineHeight = 13.sp, color = c.text2,
         maxLines = 1,
         modifier = Modifier
@@ -818,6 +831,7 @@ private fun SyncExternalScreen(onBack: () -> Unit) {
                                     "已取消：本次已入库 ${r.registered}（重复跳过 ${r.skippedDup}），已登记部分保留，再次同步自动续传"
                                 else
                                     "同步完成：入库 ${r.registered}（归真实作者 ${r.authorized}｜推文归并 ${r.tweetOnly}｜普通 ${r.plain}），重复跳过 ${r.skippedDup}" +
+                                        (if (r.stale > 0) "，清理失效登记 ${r.stale}" else "") +
                                         if (r.rootMirror) " · Root 直读模式" else ""
                             } catch (e: Exception) {
                                 "同步失败：${e.message}"
@@ -865,7 +879,7 @@ private fun SyncExternalScreen(onBack: () -> Unit) {
                     }
                 }, enabled = !syncing && !removing, kind = ButtonKind.Ghost,
                     modifier = Modifier.fillMaxWidth())
-                Text("说明：共享引用模式——扫描该目录（含子目录）的图片与视频登记进素材库，文件保留原位由属主 App（如 Edqiu）继续管理；Edqiu 导出的素材自动归并到真实作者与推文并带「E」角标；对方新下载后再次点同步即增量入账。同步可随时取消，已入库部分保留；不再需要时填回原路径点「移除该目录登记」整体退订，文件保留原位。从本 App 删除共享素材只解除登记，不动对方文件。",
+                Text("说明：共享引用模式——扫描该目录（含子目录）的图片与视频登记进素材库，文件保留原位由属主 App（如 Edqiu）继续管理；Edqiu 导出的素材自动归并到真实作者与推文并带「E」角标；对方新下载后再次点同步即增量入账，对方删除的文件同步时自动解除登记（启动与后台周期会自动同步，无需手动）。同步可随时取消，已入库部分保留；不再需要时填回原路径点「移除该目录登记」整体退订，文件保留原位。从本 App 删除共享素材只解除登记，不动对方文件。",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -905,31 +919,31 @@ private fun parseSeedColor(hex: String): Color =
     if (hex.isBlank()) Color(0xFF2F4C8F)
     else try { Color(android.graphics.Color.parseColor(hex)) } catch (e: Exception) { Color(0xFF2F4C8F) }
 
-/** 色板圆点：选中描边 + ✓；莫奈取色开启时置灰禁点。 */
+/** 色板圆点：选中描边 + ✓。 */
 @Composable
-private fun AccentDot(hex: String, name: String, color: Color, disabled: Boolean) {
-    val c = ios()
+private fun AccentDot(hex: String, name: String, color: Color) {
+    val c = eq()
     val selected = Store.accentSeed == hex
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.clickable(enabled = !disabled) {
+        modifier = Modifier.clickable {
             Store.accentSeed = hex
             Store.prefs.accentSeed = hex
         },
     ) {
         Box(
             Modifier.size(38.dp).clip(CircleShape)
-                .background(if (disabled) color.copy(alpha = 0.35f) else color)
+                .background(color)
                 .border(
                     if (selected) 2.5.dp else 1.dp,
-                    when { selected -> c.text; disabled -> c.line; else -> c.rim },
+                    if (selected) c.text else c.rim,
                     CircleShape),
             contentAlignment = Alignment.Center,
         ) {
             if (selected) Text("✓", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
         }
         Text(name, fontSize = 10.sp,
-            color = when { selected -> c.text; disabled -> c.faint; else -> c.text2 },
+            color = if (selected) c.text else c.text2,
             modifier = Modifier.padding(top = 3.dp), maxLines = 1)
     }
 }
@@ -937,7 +951,7 @@ private fun AccentDot(hex: String, name: String, color: Color, disabled: Boolean
 /** 回收站子页：统计卡 + 缩略图网格 + 单项/批量恢复与彻底删除 + 清空。 */
 @Composable
 private fun RecycleBinScreen(onBack: () -> Unit) {
-    val c = ios()
+    val c = eq()
     val scope = rememberCoroutineScope()
     var items by remember { mutableStateOf(listOf<MediaItem>()) }
     var totalBytes by remember { mutableStateOf(0L) }
@@ -1108,7 +1122,7 @@ private fun RecycleBinScreen(onBack: () -> Unit) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun RecycleSheet(m: MediaItem, onDismiss: () -> Unit, onRestore: () -> Unit, onPurge: () -> Unit) {
-    val c = LocalMonet.current
+    val c = LocalEq.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -1155,7 +1169,7 @@ private fun RecycleSheet(m: MediaItem, onDismiss: () -> Unit, onRestore: () -> U
 @Composable
 private fun ConfirmDialog(title: String, text: String, onConfirm: () -> Unit, onDismiss: () -> Unit,
                           confirmText: String = "确认删除") {
-    val c = ios()
+    val c = eq()
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = if (c.isDark) Color(0xF20E1830) else Color(0xD4F4F8FE),

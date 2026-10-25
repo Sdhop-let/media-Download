@@ -46,17 +46,13 @@ object Store {
     /** 主题模式："system" / "light" / "dark"（运行时状态，供 UI 观察） */
     var themeMode by androidx.compose.runtime.mutableStateOf("system")
 
-    /** Material You 动态取色开关（运行时状态，供 UI 即时观察） */
-    var dynamicColor by androidx.compose.runtime.mutableStateOf(false)
+    /** Material You 动态取色已随莫奈功能整体移除（2026-10-25）：主题 = 种子色派生，稳定可预期 */
 
-    /** 取色作用域："accent" / "full"（运行时状态） */
-    var dynamicScope by androidx.compose.runtime.mutableStateOf("accent")
-
-    /** 自定义主题种子色 "#RRGGBB"；"" = 默认（运行时状态） */
+    /** 自定义主题种子色 "#RRGGBB"；"" = 默认深蓝（运行时状态） */
     var accentSeed by androidx.compose.runtime.mutableStateOf("")
 
-    /** 壁纸取色版本号：壁纸 colors 变化（静态/live 壁纸）时自增，驱动莫奈取色实时重算 */
-    val monetEpoch = androidx.compose.runtime.mutableIntStateOf(0)
+    /** 壁纸舞台：自定义壁纸的本地文件路径；"" = 默认极光色场（运行时状态，设置页即时生效） */
+    var stageWallpaper by androidx.compose.runtime.mutableStateOf("")
 
     /** 底部当前 tab（0 下载 / 1 素材库 / 2 代理 / 3 设置）；空状态跨页引导跳转用 */
     var selectedTab by androidx.compose.runtime.mutableIntStateOf(0)
@@ -82,9 +78,8 @@ object Store {
         db = Db(appContext)
         prefs = Prefs(appContext)
         themeMode = prefs.themeMode
-        dynamicColor = prefs.dynamicColor
-        dynamicScope = prefs.dynamicScope
         accentSeed = prefs.accentSeed
+        stageWallpaper = prefs.stageWallpaper
         proxy = ProxyManager()
         tasks = TaskManager()
         tasks.start()
@@ -93,6 +88,9 @@ object Store {
         scope.launch(Dispatchers.IO) {
             runCatching { tasks.migrateMirrorPaths() }
             runCatching { ContentAccess.sweep() }
+            // Bug1 修复（2026-10-25）：外部目录此前只有手动同步入口，属主 App（Edqiu）
+            // 新下载的文件永远不会自动入库——启动即对已登记目录做一次静默增量登记
+            runCatching { tasks.autoSyncExternal() }
         }
         OptimizeWorker.schedule(appContext)
         // 远程图片（头像等）也走当前优选路由；磁盘缓存让重启后头像/封面免网络秒出
@@ -227,20 +225,15 @@ class Prefs(ctx: Context) {
         }
     }
 
-    /** Material You 动态取色（Android 12+） */
-    var dynamicColor: Boolean
-        get() = sp.getBoolean("dynamic_color", false)
-        set(v) = sp.edit().putBoolean("dynamic_color", v).apply()
+    /** 壁纸舞台：自定义壁纸文件路径（App 私有目录内）；"" = 默认极光色场 */
+    var stageWallpaper: String
+        get() = sp.getString("stage_wallpaper", "") ?: ""
+        set(v) = sp.edit().putString("stage_wallpaper", v).apply()
 
     /** 主题模式："system" / "light" / "dark" */
     var themeMode: String
         get() = sp.getString("theme_mode", "system") ?: "system"
         set(v) = sp.edit().putString("theme_mode", v).apply()
-
-    /** 取色作用域："accent" 仅主色 / "full" 全局跟随（背景渐变与光斑同步派生） */
-    var dynamicScope: String
-        get() = sp.getString("dynamic_scope", "accent") ?: "accent"
-        set(v) = sp.edit().putString("dynamic_scope", v).apply()
 
     /** 自定义主题种子色 "#RRGGBB"；"" = 默认深蓝。莫奈取色开启时不生效。 */
     var accentSeed: String

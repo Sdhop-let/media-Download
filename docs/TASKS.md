@@ -89,3 +89,28 @@
 - ✅ `mirror_chaquopy.py` 改造：版本 16.0.0→16.1.0、代理 7897→7890、补 target 3.12.15-0；重跑镜像 runtime 5 组件 + target 到 `D:\AndroidDev\maven-local`
 - ✅ 校验：APK 内 arm64-v8a + x86_64 共 18 个 `.so`，**未对齐数量 0**；真机弹窗消失、logcat 无兼容性告警、nativeloader 三个 stub 库加载 ok、`YtDlp: warmup ok: python started`、无崩溃
 - 顺带说明：日志里出现的 `/system/bin/app_process64` 崩溃（`DexLoadReporterExtImpl` / `Swordfish` 的 UnsatisfiedLinkError）是 ColorOS 系统组件自身问题，与 App 无关
+
+## M10 Edqiu 视觉重构 + 外部目录自动监控（2026-10-25，模拟器实测通过）
+### Bug1 修复：Edqiu 目录「扫描+监控」失效（用户反馈：升级后新素材不入库，扫描+监控是摆设）
+- 根因：外部目录同步此前只有设置页手动入口（syncExternalDir 仅被 SyncExternalScreen 调用），无任何自动触发——属主 App（Edqiu）新下载的文件永远不会自动入库
+- ✅ 启动自动增量登记：Store.init 的 IO 块新增 `tasks.autoSyncExternal()`（读 prefs.syncDir，静默增量登记，异常吞掉只打日志，不打扰用户）
+- ✅ 后台周期监控：OptimizeWorker.doWork 开头执行 autoSyncExternal()（独立于 autoOptimize 开关——素材登记不应取决于代理优选是否开启），随既有 15 分钟 WorkManager 周期
+- ✅ 并发互斥：syncExternalDir 拆为 wrapper + syncExternalDirLocked，AtomicBoolean 门保证手动/自动不会并发双写（再入抛「已有同步在进行」/静默跳过）
+- 排除项：核对 Edqiu v1.7 源码（D:\Edqiu\edqiu-dl-repo InternalMediaDownloader.kt:93）文件名格式仍为 `{uploader}_{tweetId}_{idx}_{kind}_{quality}.ext`，与 EDQIU_NAME 正则一致，非根因
+### Edqiu 视觉重构（设计蓝本 D:\Edqiu\edqiu-dl-repo：ui/components/GlassSurface.kt、LiquidTabBar.kt、GlassBackground、edqiu-liquid-glass/colors_and_type.css）
+- ✅ 删除莫奈取色全链：MonetResolver.kt 删除；Store.dynamicColor/dynamicScope/monetEpoch、MainActivity 壁纸颜色监听 + quickResolve/deepResolve 派生、设置页「莫奈动态取色/取色作用域」全部移除。ColorScience.kt 保留（纯 HCT 数学库，种子色派生用）
+- ✅ 主题令牌改名 MonetColors→EqColors / LocalMonet→LocalEq / ios()→eq()；EqTheme.resolve(seed, dark) 唯一派生路径：强调色种子（默认 #2F4C8F，Edqiu 同款深蓝）→ HCT tone 档派生全套（primary 族 + fill/track/line 中性层 + 舞台三档渐变/光斑）
+- ✅ 壁纸舞台（L0，用户点名必要）：StageBackground 默认 = 极光色场（种子色纵向渐变 endY=2800 + 顶部光晕 + 双径向光斑，Edqiu GlassBackground 同构）；可选 = 自选壁纸（GetContent 拷贝到 filesDir/stage_wallpaper.jpg，blur 22dp 毛玻璃铺底 + 明暗纱）；prefs.stage_wallpaper，设置 → 外观 → 壁纸舞台（默认极光/选择图片）
+- ✅ GlassSurface 三层玻璃（L1 0.34 / L2 0.46 / L3 0.58）移植：shadow 必须在 clip 之前（Edqiu 2026-09-14 教训）；毛玻璃 = 半透明底 + 种子色 tint + 多层渐变高光，**不用 Modifier.blur**（ColorOS 离屏渲染白框 bug，Edqiu 实测规避）；GlassCard 变为 GlassSurface L1 封装
+- ✅ 底栏 LiquidTabBar 移植：50dp stadium 玻璃壳（GlassSurface L2），选中胶囊 primaryContainer 实底 α0.94 + 圆角随位置 16→22dp 贴合内壁变形，按压 tween(50ms) 即时到位、松手 spring 回弹，文字仅选中项出现（9sp Bold），图标 21dp 选中放大 1.12；navigationBarsPadding+bottom 10dp 完整可见（修复底栏被手势区遮挡）；tab 改名 收件箱/素材库/代理/设置；图标重绘：收件筐（E 化）/ 照片框 / 地球 / 滑杆
+- ✅ 下载页（自动性去摆设）：头部「＋捕获」→「任务 N」（showTasks 时变 Primary「◂ 收件箱」），满长「任务与历史」胶囊删除；右下 FAB ＋（56dp 圆角方块主色渐变 + 投影，pasteOpen/批量选择时隐藏）承接粘贴区展开 + 剪贴板自动捕获；InboxCard 重排为 Edqiu 链接卡：84dp/20dp 圆角缩略 + 右下白边头像气泡 + ×N 角标移左上、作者名 14sp Bold + 状态淡底胶囊、平台徽章 + InfoColor @handle + fmtIso 时间右对齐、文案 11sp；筛选胶囊选中态 accent→primary 实底
+- ✅ 设置页：外观组 = 主题分段 + 壁纸舞台双按钮 + 强调色色板（AccentDot 去掉莫奈禁用逻辑，永远可点）；其余 6 目录卡排版 v1.2.0 已 Edqiu 化，保持
+- ⚠️ 构建环境变更：JAVA_HOME 失效（指向已删除的 C:\temp\jdk21），需 `JAVA_HOME="D:\AndroidDev\jdk\jdk21"` 构建
+- 验证：模拟器 MemoTest（1080×2400）安装实测：收件箱/素材库/设置/外观展开/深色主题截图 docs/edqiu-restyle-*.png；选中胶囊、FAB、极光舞台、深色海军蓝舞台均符合预期
+
+### Bug1 后半：目录清空后素材库仍显示旧 Edqiu 素材（用户二次反馈，2026-10-25 真机验证通过）
+- 现象：Edqiu 目录里的视频/图片被用户清空后，探测能正确报 0，但素材库仍显示旧登记——同步只做增量加入，从不清理「文件已消失」的陈旧登记
+- ✅ 失效登记清扫：syncExternalDirLocked 在候选收集后、登记前执行——`Db.externalDirRows(prefix, base)`（新查询，带 file_path，含回收站条目）找出登记路径不在本次候选集且文件确已不存在的条目 → `MediaFiles.deleteDisk` 清缩略图 → `hardDeleteMedia` 硬删登记行；posts/authors 留孤儿（与目录退订同语义，再同步可复用）；mediaVersion++ 驱动素材库即时刷新
+- 安全前提：清扫只在目录枚举成功后执行（useApi 过 isDirectory；root 通道 listTree 失败早已抛 UNREACHABLE），存在性判定与登记同源（File.exists / 全量枚举集合），临时不可读不会误判为已删除
+- ✅ ExternalSyncReport 增 stale 字段；设置页结果文案追加「清理失效登记 N」；说明文字补「对方删除的文件同步时自动解除登记（启动与后台周期会自动同步）」
+- ✅ 真机验证（3B161X007XP00000）：覆盖安装后冷启动，logcat `syncExternalDir: 清扫失效登记 216 条（文件已从目录消失）`——用户库中 216 条失效 Edqiu 登记在首次启动自动清扫完成

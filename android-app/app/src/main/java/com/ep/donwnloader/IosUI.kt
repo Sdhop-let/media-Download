@@ -1,5 +1,6 @@
 package com.ep.donwnloader
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColor
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.LinearEasing
@@ -9,10 +10,30 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.updateTransition
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.Image
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.foundation.shape.CornerBasedShape
+import androidx.compose.ui.graphics.ImageBitmap
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.kyant.backdrop.drawBackdrop
+import com.kyant.backdrop.effects.blur
+import com.kyant.backdrop.effects.lens
+import com.kyant.backdrop.effects.vibrancy
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.hypot
+import kotlin.math.sin
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -42,14 +63,16 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
@@ -62,32 +85,41 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /* ============================================================
- * Monet 2026 深蓝 × iOS26 Liquid Glass 设计系统 v2
- * 浅/深双主题 · 品牌深蓝 #2F4C8F · 玻璃拟态 + 流光进度
+ * Edqiu 液态玻璃设计系统 v3（2026-10-25 全面改版）
+ * 壁纸舞台（L0 彩色色场/自定义壁纸）+ 三层玻璃 + 品牌深蓝
+ * 设计蓝本：Edqiu GlassSurface / LiquidTabBar / eq-stage（D:\Edqiu\edqiu-dl-repo）
  * ============================================================ */
 
-data class MonetColors(
+data class EqColors(
     val isDark: Boolean,
-    val bg: Color,        // 页面底（渐变第一档）
-    val bg2: Color,       // 页面底（渐变第二档）
-    val bg3: Color,       // 页面底（渐变第三档）
+    val bg: Color,        // 舞台渐变第一档（顶部）
+    val bg2: Color,       // 舞台渐变第二档
+    val bg3: Color,       // 舞台渐变第三档（底部）
     val text: Color,      // 主文字
     val text2: Color,     // 次文字
     val faint: Color,     // 弱文字/未选
-    val primary: Color,   // 品牌深蓝（主色）
+    val primary: Color,   // 品牌主色
     val primaryA: Color,  // 渐变亮端
     val primaryDeep: Color, // 渐变深端
     val accent: Color,
@@ -101,118 +133,82 @@ data class MonetColors(
     val fill: Color,      // 输入/次级底
     val glow: Color,      // 玻璃投影色
     val track: Color,     // 进度轨道
-    val spotA: Color = Color(0xFFDDE6FA),  // 背景光斑 A（取色全局跟随派生时随动）
-    val spotB: Color = Color(0xFFDEF0E9),  // 背景光斑 B
+    val spotA: Color,     // 舞台光斑 A（左上）
+    val spotB: Color,     // 舞台光斑 B（右上）
 )
 
-val MonetLight = MonetColors(
-    isDark = false,
-    bg = Color(0xFFEEF2FB), bg2 = Color(0xFFE9EFFB), bg3 = Color(0xFFE4EDFA),
-    text = Color(0xFF16213E), text2 = Color(0xFF33456F), faint = Color(0xFF94A0B8),
-    primary = Color(0xFF2F4C8F), primaryA = Color(0xFF4C6FB4), primaryDeep = Color(0xFF223660),
-    accent = Color(0xFF8AA5E0), teal = Color(0xFF61C7B0),
-    ok = Color(0xFF2E9E7C), warn = Color(0xFFC97A26), err = Color(0xFFC0433C), errText = Color(0xFFC0433C),
-    line = Color(0xFFDCE5F5), rim = Color(0x8CFFFFFF), fill = Color(0xFFE8EEF9),
-    glow = Color(0x334C6FB4), track = Color(0xFFE4EAF6),
-)
+/** 主题解析：强调色种子（默认 Edqiu 同款深蓝）→ HCT 全量派生。
+ *  莫奈/壁纸取色已整体移除——舞台色域跟随强调色，稳定且可预期。 */
+object EqTheme {
+    val DEFAULT_SEED = Color(0xFF2F4C8F)
 
-val MonetDark = MonetColors(
-    isDark = true,
-    bg = Color(0xFF0B1324), bg2 = Color(0xFF0E1830), bg3 = Color(0xFF101C38),
-    text = Color(0xFFEDF2FC), text2 = Color(0xFFA9B7D4), faint = Color(0xFF6B7C9E),
-    primary = Color(0xFF8FA9DE), primaryA = Color(0xFFAFC4EC), primaryDeep = Color(0xFF5C7DBB),
-    accent = Color(0xFF7B99D6), teal = Color(0xFF4FC4AC),
-    ok = Color(0xFF43C795), warn = Color(0xFFE8A75A), err = Color(0xFFE47C7C), errText = Color(0xFFF0A6A6),
-    line = Color(0xFF22304E), rim = Color(0x26FFFFFF), fill = Color(0xFF16233F),
-    glow = Color(0x662F4C8F), track = Color(0xFF1B2944),
-)
-
-val LocalMonet = staticCompositionLocalOf { MonetLight }
-
-/** 全局取色入口。 */
-@Composable fun ios(): MonetColors = LocalMonet.current
-
-// ---------------- 主题派生（莫奈取色作用域 / 自定义种子色） ----------------
-
-/** 由取色来源派生完整 MonetColors 令牌。
- *  - scope="accent"：只动主色系（按钮/选中态/进度），背景与光斑保持中性
- *  - scope="full"：背景渐变与光斑同步向取色色调偏移，整体视觉统一
- *
- *  Color Output Spec 2025（HCT 空间）派生规则：
- *  - 系统角色（primary/accent/teal）用 dynamicColorScheme 原值，单一真源不重算；
- *  - 派生令牌从 primary 所在 TonalPalette 取 tone 档（同 hue 定理 → 与系统色零漂移）；
- *  - 中性令牌（fill/track/line/bg）用低彩度 neutral palette 固定 tone 档，
- *    tone 层次继承原设计（light 95/94/93/94/92/91，dark 6/9/11/14/17/20）；
- *  - 全程 HCT 运算，禁止 sRGB lerp（sRGB 插值掉 chroma 且 hue 漂移）。 */
-object ThemeDerive {
-    /** 莫奈动态取色派生（Android 12+ System 色板，prim/secondary/tertiary 为系统原值）。 */
-    fun fromDynamic(
-        base: MonetColors, prim: Color, secondary: Color, tertiary: Color, scope: String,
-    ): MonetColors {
-        val d = base.isDark
-        val P = ColorScience.paletteOf(prim)
-        val pt = ColorScience.hct(prim).tone
-        var c = base.copy(
-            primary = prim,
-            primaryA = ColorScience.toneAt(P, (pt + if (d) 8.0 else 20.0).coerceIn(15.0, 95.0)),
-            primaryDeep = ColorScience.toneAt(P, (pt + if (d) -8.0 else -12.0).coerceIn(5.0, 90.0)),
-            accent = secondary,
-            teal = tertiary,
-            ok = tertiary,
-            glow = prim.copy(alpha = 0.2f),
-        )
-        // 中性偏色令牌随取色 hue 去蓝灰默认感：任务与历史胶囊/输入框/分段控件（fill）、
-        // 进度轨道（track）、分隔线（line）——tone 层次固定，hue 随壁纸（不分作用域）
-        c = tintNeutrals(c, ColorScience.neutralPaletteOf(prim))
-        if (scope == "full") c = tintSurfaces(c, ColorScience.neutralPaletteOf(prim, 1.35), prim)
-        return c
+    fun resolve(dark: Boolean, seed: Color? = null): EqColors {
+        val s = seed ?: DEFAULT_SEED
+        val P = ColorScience.paletteOf(s)
+        val N = ColorScience.neutralPaletteOf(s)
+        val T = ColorScience.paletteOf(TEAL_SEED)
+        if (dark) {
+            val bg = ColorScience.toneAt(P, 7.0)
+            val bg2 = ColorScience.toneAt(P, 10.0)
+            val bg3 = ColorScience.toneAt(P, 13.0)
+            val primary = ColorScience.ensureContrast(ColorScience.toneAt(P, 80.0), bg2, P, true)
+            return EqColors(
+                isDark = true,
+                bg = bg, bg2 = bg2, bg3 = bg3,
+                text = Color(0xFFEDF2FC), text2 = Color(0xFFA9B7D4), faint = Color(0xFF6B7C9E),
+                primary = primary,
+                primaryA = ColorScience.toneAt(P, 88.0),
+                primaryDeep = ColorScience.toneAt(P, 60.0),
+                accent = ColorScience.toneAt(P, 70.0),
+                teal = ColorScience.toneAt(T, 70.0),
+                ok = Color(0xFF43C795), warn = Color(0xFFE8A75A),
+                err = Color(0xFFE47C7C), errText = Color(0xFFF0A6A6),
+                line = ColorScience.toneAt(N, 20.0),
+                rim = Color(0x26FFFFFF),
+                fill = ColorScience.toneAt(N, 14.0),
+                glow = primary.copy(alpha = 0.40f),
+                track = ColorScience.toneAt(N, 17.0),
+                spotA = primary.copy(alpha = 0.30f),
+                spotB = ColorScience.toneAt(T, 60.0).copy(alpha = 0.26f),
+            )
+        } else {
+            val bg = ColorScience.toneAt(P, 89.0)
+            val bg2 = ColorScience.toneAt(P, 92.0)
+            val bg3 = ColorScience.toneAt(P, 95.0)
+            val primary = ColorScience.ensureContrast(ColorScience.toneAt(P, 40.0), bg2, P, false)
+            return EqColors(
+                isDark = false,
+                bg = bg, bg2 = bg2, bg3 = bg3,
+                text = Color(0xFF16213E), text2 = Color(0xFF33456F), faint = Color(0xFF94A0B8),
+                primary = primary,
+                primaryA = ColorScience.toneAt(P, 60.0),
+                primaryDeep = ColorScience.toneAt(P, 28.0),
+                accent = ColorScience.toneAt(P, 50.0),
+                teal = ColorScience.toneAt(T, 45.0),
+                ok = Color(0xFF2E9E7C), warn = Color(0xFFC97A26),
+                err = Color(0xFFC0433C), errText = Color(0xFFC0433C),
+                line = ColorScience.toneAt(N, 88.0),
+                rim = Color(0x8CFFFFFF),
+                fill = ColorScience.toneAt(N, 94.0),
+                glow = primary.copy(alpha = 0.20f),
+                track = ColorScience.toneAt(N, 91.0),
+                spotA = ColorScience.toneAt(P, 84.0).copy(alpha = 0.85f),
+                spotB = ColorScience.toneAt(T, 86.0).copy(alpha = 0.75f),
+            )
+        }
     }
 
-    /** 自定义种子色派生（与莫奈路径共用同一条 HCT 管线，M3 规范档位）。 */
-    fun fromSeed(base: MonetColors, seed: Color, scope: String): MonetColors {
-        val d = base.isDark
-        val P = ColorScience.paletteOf(seed)
-        val primary = ColorScience.color(P.tone(if (d) 80 else 40))
-        var c = base.copy(
-            primary = ColorScience.ensureContrast(primary, base.bg, P, d),
-            primaryA = ColorScience.toneAt(P, if (d) 88.0 else 60.0),
-            primaryDeep = ColorScience.toneAt(P, if (d) 72.0 else 28.0),
-            accent = ColorScience.toneAt(P, if (d) 86.0 else 50.0),
-            glow = primary.copy(alpha = if (d) 0.4f else 0.2f),
-        )
-        c = tintNeutrals(c, ColorScience.neutralPaletteOf(seed))
-        if (scope == "full") c = tintSurfaces(c, ColorScience.neutralPaletteOf(seed, 1.35), primary)
-        return c
-    }
-
-    /** fill/track/line：中性 palette 固定 tone 档（继承原设计层次，hue 随取色，可读性恒定）。 */
-    private fun tintNeutrals(c: MonetColors, N: io.material.color.utilities.palettes.TonalPalette): MonetColors {
-        val d = c.isDark
-        return c.copy(
-            fill = ColorScience.toneAt(N, if (d) 14.0 else 94.0),
-            track = ColorScience.toneAt(N, if (d) 17.0 else 92.0),
-            line = ColorScience.toneAt(N, if (d) 20.0 else 91.0),
-        )
-    }
-
-    /** 全局跟随：背景三档中性 tone 档；光斑对 prim 做 HCT 插值（hue 稳定不漂灰）。 */
-    private fun tintSurfaces(c: MonetColors, N: io.material.color.utilities.palettes.TonalPalette, prim: Color): MonetColors {
-        val d = c.isDark
-        return c.copy(
-            bg = ColorScience.toneAt(N, if (d) 6.0 else 95.0),
-            bg2 = ColorScience.toneAt(N, if (d) 9.0 else 94.0),
-            bg3 = ColorScience.toneAt(N, if (d) 11.0 else 93.0),
-            spotA = prim.copy(alpha = if (d) 0.28f else 0.80f),
-            spotB = ColorScience.lerpHct(prim, if (d) Color.Black else Color.White, 0.40f)
-                .copy(alpha = if (d) 0.22f else 0.70f),
-        )
-    }
+    /** 舞台光斑之外的第三色（青色系，固定 hue 保证极光语感）。 */
+    val TEAL_SEED = Color(0xFF1898B8)
 }
 
-/** M3 配色方案：由派生 MonetColors 生成（spec 2025 完整表面体系），
- *  保证 M3 组件（输入框/弹层/开关/Chip）与玻璃令牌同步换肤。
- *  surfaceContainer 六档与 container 角色按规范 tone 档由中性/主 palette 派生。 */
-fun monetScheme(c: MonetColors): androidx.compose.material3.ColorScheme {
+val LocalEq = staticCompositionLocalOf { EqTheme.resolve(false) }
+
+/** 全局取色入口。 */
+@Composable fun eq(): EqColors = LocalEq.current
+
+/** M3 配色方案：由 EqColors 生成，M3 组件（输入框/弹层/开关）与玻璃令牌同步换肤。 */
+fun eqScheme(c: EqColors): androidx.compose.material3.ColorScheme {
     val P = ColorScience.paletteOf(c.primary)
     val S = ColorScience.paletteOf(c.teal)
     val N = ColorScience.neutralPaletteOf(c.primary)
@@ -224,51 +220,20 @@ fun monetScheme(c: MonetColors): androidx.compose.material3.ColorScheme {
         background = c.bg, onBackground = c.text,
         surface = c.fill, onSurface = c.text,
         surfaceVariant = c.fill, onSurfaceVariant = c.text2,
-        surfaceDim = ColorScience.toneAt(N, 6.0), surfaceBright = ColorScience.toneAt(N, 24.0),
-        surfaceContainerLowest = ColorScience.toneAt(N, 4.0),
-        surfaceContainerLow = ColorScience.toneAt(N, 10.0),
-        surfaceContainer = ColorScience.toneAt(N, 12.0),
-        surfaceContainerHigh = ColorScience.toneAt(N, 17.0),
-        surfaceContainerHighest = ColorScience.toneAt(N, 22.0),
         outline = c.line, outlineVariant = ColorScience.toneAt(N, 30.0),
         error = c.errText, onError = Color(0xFF2A0B0B),
     ) else androidx.compose.material3.lightColorScheme(
-        primary = c.primary, onPrimary = ColorScience.toneAt(P, 100.0),
+        primary = c.primary, onPrimary = Color.White,
         primaryContainer = ColorScience.toneAt(P, 90.0), onPrimaryContainer = ColorScience.toneAt(P, 10.0),
-        secondary = c.teal, onSecondary = ColorScience.toneAt(S, 100.0),
+        secondary = c.teal, onSecondary = Color.White,
         secondaryContainer = ColorScience.toneAt(S, 90.0), onSecondaryContainer = ColorScience.toneAt(S, 10.0),
         background = c.bg, onBackground = c.text,
         surface = c.fill, onSurface = c.text,
         surfaceVariant = c.fill, onSurfaceVariant = c.text2,
-        surfaceDim = ColorScience.toneAt(N, 87.0), surfaceBright = ColorScience.toneAt(N, 98.0),
-        surfaceContainerLowest = ColorScience.toneAt(N, 100.0),
-        surfaceContainerLow = ColorScience.toneAt(N, 96.0),
-        surfaceContainer = ColorScience.toneAt(N, 94.0),
-        surfaceContainerHigh = ColorScience.toneAt(N, 92.0),
-        surfaceContainerHighest = ColorScience.toneAt(N, 90.0),
         outline = c.line, outlineVariant = ColorScience.toneAt(N, 80.0),
         error = c.errText, onError = Color.White,
     )
 }
-
-/** M3 配色方案（供 Button/TextField 等组件在双主题下自适应）。 */
-val MonetLightScheme = lightColorScheme(
-    primary = MonetLight.primary, onPrimary = Color.White,
-    secondary = MonetLight.teal, onSecondary = Color.White,
-    background = MonetLight.bg, onBackground = MonetLight.text,
-    surface = MonetLight.fill, onSurface = MonetLight.text,
-    surfaceVariant = MonetLight.fill, onSurfaceVariant = MonetLight.text2,
-    outline = MonetLight.line, error = MonetLight.errText, onError = Color.White,
-)
-
-val MonetDarkScheme = darkColorScheme(
-    primary = MonetDark.primary, onPrimary = Color(0xFF10213F),
-    secondary = MonetDark.teal, onSecondary = Color(0xFF062E27),
-    background = MonetDark.bg, onBackground = MonetDark.text,
-    surface = MonetDark.fill, onSurface = MonetDark.text,
-    surfaceVariant = MonetDark.fill, onSurfaceVariant = MonetDark.text2,
-    outline = MonetDark.line, error = MonetDark.errText, onError = Color(0xFF2A0B0B),
-)
 
 // ---------------- 状态与平台语义色 ----------------
 
@@ -280,72 +245,395 @@ val TwColor = Color(0xFF16213E)
 val IgColor = Color(0xFFE1306C)
 val BsColor = Color(0xFF1185FE)
 
-@Composable
-private fun glassBrush(c: MonetColors): Brush {
-    return if (c.isDark) Brush.linearGradient(
-        0f to Color(0x1CFFFFFF),
-        0.55f to Color(0x0EFFFFFF),
-        1f to Color(0x07FFFFFF),
-        start = Offset(0f, 0f), end = Offset(0.45f, 1f),
+// ---------------- 玻璃表面（Edqiu repo 最新版同构移植，M11：真折射 + 手绘回退双路径） ----------------
+
+/**
+ * 玻璃层级（Edqiu 设计文档 §3.2）：
+ * - L1 页面层：列表、卡片所在区域（大面玻璃，重透）
+ * - L2 浮层：底部导航栏、悬浮控件（悬浮玻璃）
+ * - L3 弹出层：BottomSheet、Snackbar（最高层玻璃）
+ *
+ * 2026-09-21 投影移除 + 边缘光引入：层级浮起感由材质承担（不依赖投影落差）——
+ * shadow 在透明玻璃后会从背后透出成"长方形色块"，这是 Edqiu 实机判决过的坑。
+ * 2026-10-24 档位取值 = Edqiu「四方面优化」后的最新值：L1 真折射后壁纸直接透进
+ * 卡面，bgAlpha 0.30 给文字稳定基座；edgeLight/topLight 减半——轮廓定义交给
+ * 光学弯折 + 色散，不是白线。
+ */
+enum class GlassTier(
+    val bgAlpha: Float,
+    val edgeAlpha: Float,
+    /** 内描边边缘光强度系数（全轮廓的白+seed 双色描边）。 */
+    val edgeLight: Float = 1f,
+    /** 顶部渐变光带强度系数（玻璃上沿反射）。 */
+    val topLight: Float = 1f
+) {
+    L1(0.30f, 0.24f, edgeLight = 0.35f, topLight = 0.40f),
+    L2(0.38f, 0.30f, edgeLight = 1.15f, topLight = 1.20f),
+    L3(0.58f, 0.34f, edgeLight = 1.45f, topLight = 1.50f)
+}
+
+/**
+ * 玻璃内描边边缘光（Edqiu glassEdgeLight 同构移植）。
+ *
+ * 投影移除后，卡片的"轮廓存在感"与层级浮起感全部转由材质承担，此修饰符即核心手段。
+ * 实现要点：
+ * - 纯 Canvas 描边（drawWithContent + Stroke），不涉及任何离屏渲染；
+ * - 双色：顶部白高光（环境光反射）+ 底部 seed 色微光（环境色反射）——玻璃边缘"透出彩"；
+ * - 描边为内描边（沿形状内侧半宽绘制），不会溢出卡片轮廓；
+ * - 光源方向（GlassLightAngle）驱动渐变亮端；色散 > 0 时叠加暖/冷副描边（棱镜色散）。
+ */
+fun Modifier.glassEdgeLight(
+    shape: androidx.compose.ui.graphics.Shape,
+    seed: Color,
+    whiteTop: Float,
+    whiteBottom: Float,
+    seedTop: Float,
+    seedBottom: Float,
+    width: Dp = 1.25.dp,
+    lightStrength: Float = 1f,
+    lightAngle: Float = -45f,
+    lightIntensity: Float = 1f,
+    dispersion: Float = 0f
+): Modifier = this.drawWithContent {
+    drawContent()
+    val stroke = width.toPx()
+    if (stroke <= 0f) return@drawWithContent
+    val ls = lightStrength.coerceAtLeast(0f)
+    val li = lightIntensity.coerceIn(0f, 2f)
+    val halfInset = stroke / 2f
+    // 屏幕坐标 y 向下，θ=-45 须指向左上 → 指向光源的单位向量取 (sin θ, -cos θ)
+    val rad = lightAngle * PI.toFloat() / 180f
+    val dx = sin(rad)
+    val dy = -cos(rad)
+    val cx = size.width / 2f
+    val cy = size.height / 2f
+    val radius = hypot(size.width, size.height) / 2f
+    val lightSide = Offset(cx + dx * radius, cy + dy * radius)
+    val darkSide = Offset(cx - dx * radius, cy - dy * radius)
+    val whiteBrush = Brush.linearGradient(
+        start = lightSide, end = darkSide,
+        colors = listOf(
+            Color.White.copy(alpha = (whiteTop * ls * li).coerceIn(0f, 1f)),
+            Color.White.copy(alpha = (whiteBottom * ls * li).coerceIn(0f, 1f))
+        )
     )
-    else Brush.linearGradient(
-        0f to Color(0x38FFFFFF),
-        0.55f to Color(0x20FFFFFF),
-        1f to Color(0x14FFFFFF),
-        start = Offset(0f, 0f), end = Offset(0.45f, 1f),
+    val seedBrush = Brush.linearGradient(
+        start = lightSide, end = darkSide,
+        colors = listOf(
+            seed.copy(alpha = (seedTop * ls * li).coerceIn(0f, 1f)),
+            seed.copy(alpha = (seedBottom * ls * li).coerceIn(0f, 1f))
+        )
+    )
+    // 内描边：形状尺寸向内缩一个线宽再整体外移半个线宽 → 恰好贴内侧轮廓
+    val outline = shape.createOutline(
+        size = Size((size.width - stroke).coerceAtLeast(0f), (size.height - stroke).coerceAtLeast(0f)),
+        layoutDirection = layoutDirection,
+        density = this
+    )
+    val path = Path()
+    when (outline) {
+        is androidx.compose.ui.graphics.Outline.Rounded -> path.addRoundRect(outline.roundRect)
+        is androidx.compose.ui.graphics.Outline.Rectangle -> path.addRect(outline.rect)
+        is androidx.compose.ui.graphics.Outline.Generic -> path.addPath(outline.path)
+    }
+    val strokeStyle = Stroke(width = stroke)
+    translate(left = halfInset, top = halfInset) {
+        // 色散副描边：暖色朝光源侧（R 偏折大）、冷色朝背光侧（B 偏折大），
+        // alpha ≤ 0.15 极其微妙，只作折射点缀；偏移 1.2×stroke 保证不溢出轮廓
+        if (dispersion > 0.01f) {
+            val dispAlpha = (0.10f * dispersion * lightIntensity).coerceIn(0f, 1f)
+            if (dispAlpha > 0f) {
+                translate(left = dx * stroke * 1.2f, top = dy * stroke * 1.2f) {
+                    drawPath(path, Color(0xFFFF6B4A).copy(alpha = dispAlpha), style = strokeStyle)
+                }
+                translate(left = -dx * stroke * 1.2f, top = -dy * stroke * 1.2f) {
+                    drawPath(path, Color(0xFF4AC8FF).copy(alpha = dispAlpha), style = strokeStyle)
+                }
+            }
+        }
+        // seed 层先画（打底）；白色高光层叠加（光源侧更亮）
+        drawPath(path = path, brush = seedBrush, style = strokeStyle)
+        drawPath(path = path, brush = whiteBrush, style = strokeStyle)
+    }
+}
+
+/**
+ * 玻璃表面光装饰层（Edqiu GlassSurfaceLights 同构移植，真折射/手绘双路径共用）。
+ * 五层：背景渐变折射 → 顶部方向性高光线 → 内高光渐变 → 细镜面高光 → 底部反光。
+ * 与背后采样层叠加才是完整玻璃（Apple 结构：采样层 + 表面光层 + 内容层，缺一即「贴膜感」）。
+ *
+ * @param alphaScale 白色装饰整体缩放。真折射路径背后是 backdrop 真实采样，白装饰 ×0.7
+ *   收敛（白叠白）；手绘回退路径背后无采样，×1 保持原观感。
+ */
+@Composable
+private fun BoxScope.GlassSurfaceLights(
+    dark: Boolean,
+    tier: GlassTier,
+    lightAngle: Float,
+    lightIntensity: Float,
+    lightStrength: Float,
+    alphaScale: Float
+) {
+    // 背景渐变折射：上部亮 + 底部微暗（模拟玻璃曲率）
+    Box(
+        Modifier
+            .matchParentSize()
+            .background(
+                Brush.verticalGradient(
+                    0f to Color.White.copy(alpha = (((if (dark) 0.03f else 0.10f) * lightIntensity) * alphaScale).coerceIn(0f, 1f)),
+                    0.55f to Color.Transparent,
+                    1f to Color.Black.copy(alpha = (((if (dark) 0.06f else 0.015f) * lightIntensity) * alphaScale).coerceIn(0f, 1f))
+                )
+            )
+    )
+    // 顶部折射高光线（Liquid 灵魂）：沿 lightAngle 方向，亮端锚定光源侧边缘
+    Box(
+        Modifier
+            .matchParentSize()
+            .drawBehind {
+                val rad = lightAngle * PI.toFloat() / 180f
+                val dx = sin(rad)
+                val dy = -cos(rad)
+                val halfSpan = abs(dx) * size.width / 2f + abs(dy) * size.height / 2f
+                val start = Offset(size.width / 2f + dx * halfSpan, size.height / 2f + dy * halfSpan)
+                val end = Offset(start.x - dx * 90f, start.y - dy * 90f)
+                drawRect(
+                    Brush.linearGradient(
+                        colors = listOf(
+                            Color.White.copy(alpha = ((tier.edgeAlpha * 0.7f * tier.topLight * lightStrength * lightIntensity) * alphaScale).coerceIn(0f, 1f)),
+                            Color.White.copy(alpha = ((tier.edgeAlpha * 0.08f * lightIntensity) * alphaScale).coerceIn(0f, 1f)),
+                            Color.Transparent
+                        ),
+                        start = start,
+                        end = end
+                    )
+                )
+            }
+    )
+    // 内高光描边：顶部亮、底部暗（玻璃边缘光）
+    Box(
+        Modifier
+            .matchParentSize()
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        Color.White.copy(alpha = (((if (dark) 0.06f else 0.08f) * lightIntensity) * alphaScale).coerceIn(0f, 1f)),
+                        Color.White.copy(alpha = ((0.03f * lightIntensity) * alphaScale).coerceIn(0f, 1f)),
+                        Color.White.copy(alpha = (((if (dark) 0.015f else 0.04f) * lightIntensity) * alphaScale).coerceIn(0f, 1f))
+                    ),
+                    startY = 0f,
+                    endY = 400f
+                )
+            )
+    )
+    // iOS 26 液态玻璃增强：细镜面高光（更亮、更窄，模拟玻璃上沿反射）
+    Box(
+        Modifier
+            .matchParentSize()
+            .drawBehind {
+                val rad = lightAngle * PI.toFloat() / 180f
+                val dx = sin(rad)
+                val dy = -cos(rad)
+                val halfSpan = abs(dx) * size.width / 2f + abs(dy) * size.height / 2f
+                val start = Offset(size.width / 2f + dx * halfSpan, size.height / 2f + dy * halfSpan)
+                val end = Offset(start.x - dx * 60f, start.y - dy * 60f)
+                drawRect(
+                    Brush.linearGradient(
+                        colors = listOf(
+                            Color.White.copy(alpha = (((if (dark) 0.08f else 0.12f) * tier.topLight * lightStrength * lightIntensity) * alphaScale).coerceIn(0f, 1f)),
+                            Color.White.copy(alpha = ((0.015f * lightIntensity) * alphaScale).coerceIn(0f, 1f)),
+                            Color.Transparent
+                        ),
+                        start = start,
+                        end = end
+                    )
+                )
+            }
+    )
+    // 底部微弱反光（玻璃下缘向内容区回弹一点光）
+    Box(
+        Modifier
+            .matchParentSize()
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        Color.Transparent,
+                        Color.White.copy(alpha = ((if (dark) 0.015f else 0.02f) * alphaScale).coerceIn(0f, 1f))
+                    )
+                )
+            )
     )
 }
 
-/** 极光渐变页面背景：三色光斑 + 纵向底色，深浅双主题；光斑色随取色作用域派生（spotA/spotB）。 */
+/**
+ * 毛玻璃表面组件（Edqiu repo 最新版同构移植）：
+ * - 真折射路径（Android 13+ + 舞台 backdrop 可用 + 液态玻璃开）：vibrancy → blur → lens
+ *   采样舞台壁纸锐源，表面色画在采样之上（onDrawSurface）；
+ * - 手绘回退路径：渐变高光 + API 31+ 真高斯磨砂（8-36dp，Unbounded + 外层 clip 安全结构）；
+ * - 液态玻璃关：普通哑光面板。
+ *
+ * ⚠️ 内容对齐坑（Edqiu 2026-10-20 实机 bug）：内容 Box 默认 TopStart 且不传最小约束，
+ * 固定尺寸表层若直接塞 contentAlignment=Center 的内层 Box 会钉在左上角——内层必须
+ * `Box(Modifier.fillMaxSize(), contentAlignment = Center)`。
+ */
 @Composable
-fun GlassBackground(modifier: Modifier = Modifier, content: @Composable BoxScope.() -> Unit) {
-    val c = LocalMonet.current
-    Box(modifier.fillMaxSize().background(Brush.verticalGradient(listOf(c.bg, c.bg2, c.bg3)))) {
-        Box(
-            Modifier.align(Alignment.TopStart).size(560.dp)
-                .offset(x = (-140).dp, y = (-180).dp)
-                .background(Brush.radialGradient(
-                    listOf(c.spotA, c.spotA.copy(alpha = 0f))), CircleShape))
-        Box(
-            Modifier.align(Alignment.TopEnd).size(480.dp)
-                .offset(x = 140.dp, y = (-120).dp)
-                .background(Brush.radialGradient(
-                    listOf(c.spotB, c.spotB.copy(alpha = 0f))), CircleShape))
-        // 底部不放光斑：底栏区域只悬浮胶囊本身
+fun GlassSurface(
+    modifier: Modifier = Modifier,
+    tier: GlassTier = GlassTier.L1,
+    shape: androidx.compose.ui.graphics.Shape = RoundedCornerShape(24.dp),
+    tint: Color = MaterialTheme.colorScheme.primaryContainer,
+    content: @Composable BoxScope.() -> Unit
+) {
+    val c = eq()
+    val dark = c.isDark
+    val liquidGlass = ThemeEffects.LiquidGlassEnabled.current
+    val transparency = ThemeEffects.GlassTransparency.current.coerceIn(0f, 1f)
+    val frost = ThemeEffects.GlassFrostStrength.current.coerceIn(0f, 1f)
+    val edgeWidth = ThemeEffects.GlassEdgeWidth.current.coerceIn(0f, 2.5f)
+    val lightStrength = ThemeEffects.GlassEdgeLightStrength.current.coerceIn(0f, 1.6f)
+    val dim = ThemeEffects.effectiveDim(ThemeEffects.GlassDimAmount.current, dark)
+    val lightAngle = ThemeEffects.GlassLightAngle.current
+    val lightIntensity = ThemeEffects.GlassLightIntensity.current.coerceIn(0f, 1f)
+    val dispersion = ThemeEffects.GlassDispersion.current.coerceIn(0f, 1f)
+
+    // 玻璃底色 = 半透明白/暗（主体）+ 主题容器色 tint；透明度 t 在 1.3x（实）与 0.55x（透）间缩放
+    // 2026-10-25 壁纸舞台灰字可读性（Edqiu 用户实报）：浅色卡面 +0.12 白——灰字需要稳定浅色衬底
+    val alphaScale = 1.30f - 0.75f * transparency
+    val base = if (dark) {
+        Color(0xFF1A1D21).copy(alpha = (tier.bgAlpha + 0.10f) * alphaScale)
+    } else {
+        Color.White.copy(alpha = (tier.bgAlpha + 0.12f) * alphaScale)
+    }
+    val glassColor = androidx.compose.ui.graphics.lerp(
+        base,
+        tint.copy(alpha = if (dark) 0.30f else 0.34f),
+        (if (dark) 0.45f else 0.40f) * (1f - frost * 0.4f)
+    )
+    val edgeSeed = c.primary
+
+    // 真折射路径判定：采样源 = LocalStageBackdrop（壁纸锐源链，链内无卡片，无递归捕获）
+    val stageBackdrop = LocalStageBackdrop.current
+    val canReal = stageBackdrop != null &&
+        android.os.Build.VERSION.SDK_INT >= 33 &&
+        liquidGlass &&
+        shape is CornerBasedShape
+    val realBlur = (4f + 16f * frost).dp
+    val realRefraction = ThemeEffects.GlassRefractionStrength.current.coerceIn(0f, 1f)
+    val realLensHeight = 18.dp
+    // 2026-10-24 卡片边缘强化：位移曲线 0.4+1.6r（默认 r=0.6 → 24.5dp）
+    val realLensAmount = 18.dp * (0.4f + 1.6f * realRefraction)
+
+    val m = modifier
+        .clip(shape)
+        // 真折射表面色由 drawBackdrop 的 onDrawSurface 画在采样之上，不走 .background
+        .then(if (canReal) Modifier else Modifier.background(glassColor))
+        .glassEdgeLight(
+            shape = shape,
+            seed = edgeSeed,
+            whiteTop = (if (dark) 0.20f else 0.26f) * tier.edgeLight,
+            whiteBottom = (if (dark) 0.05f else 0.07f) * tier.edgeLight,
+            seedTop = (if (dark) 0.22f else 0.20f) * tier.edgeLight,
+            seedBottom = (if (dark) 0.34f else 0.30f) * tier.edgeLight,
+            width = edgeWidth.dp,
+            lightStrength = lightStrength,
+            lightAngle = lightAngle,
+            lightIntensity = lightIntensity,
+            dispersion = dispersion
+        )
+
+    Box(modifier = m) {
+        if (canReal) {
+            // 真折射采样层：vibrancy → blur → lens 作用于舞台壁纸真实像素
+            Box(
+                Modifier
+                    .matchParentSize()
+                    .drawBackdrop(
+                        backdrop = stageBackdrop!!,
+                        shape = { shape as CornerBasedShape },
+                        effects = {
+                            vibrancy()
+                            blur(realBlur.toPx())
+                            lens(
+                                realLensHeight.toPx(),
+                                realLensAmount.toPx(),
+                                chromaticAberration = dispersion > 0f
+                            )
+                        },
+                        onDrawSurface = { drawRect(glassColor) }
+                    )
+            )
+            // 表面光装饰：背后已有真实采样，白装饰 ×0.7 收敛避免白叠白
+            GlassSurfaceLights(dark, tier, lightAngle, lightIntensity, lightStrength, alphaScale = 0.7f)
+        } else if (liquidGlass) {
+            // 手绘回退路径：装饰保持原强度 + 磨砂雾感（渐变之上叠真高斯，Edqiu A 方案）
+            GlassSurfaceLights(dark, tier, lightAngle, lightIntensity, lightStrength, alphaScale = 1f)
+            if (frost > 0f) {
+                Box(
+                    Modifier
+                        .matchParentSize()
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    Color.White.copy(alpha = ((0.05f + 0.13f * frost) * lightIntensity).coerceIn(0f, 1f)),
+                                    Color.Transparent,
+                                    Color.White.copy(alpha = ((0.02f + 0.05f * frost) * lightIntensity).coerceIn(0f, 1f))
+                                ),
+                                startY = 0f,
+                                endY = 220f
+                            )
+                        )
+                        .then(
+                            if (android.os.Build.VERSION.SDK_INT >= 31) {
+                                Modifier.blur((8f + 28f * frost).dp, BlurredEdgeTreatment.Unbounded)
+                            } else Modifier
+                        )
+                )
+            }
+        } else {
+            // 液态玻璃关闭：普通哑光面板（透明度 t 与磨砂 f 独立可调）
+            Box(
+                Modifier
+                    .matchParentSize()
+                    .background(
+                        MaterialTheme.colorScheme.surfaceContainerHigh
+                            .copy(alpha = 0.96f - 0.41f * transparency)
+                    )
+            )
+            if (frost > 0f) {
+                Box(
+                    Modifier
+                        .matchParentSize()
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    Color.White.copy(alpha = 0.04f + 0.12f * frost),
+                                    Color.Transparent,
+                                    Color.White.copy(alpha = 0.01f + 0.05f * frost)
+                                ),
+                                startY = 0f,
+                                endY = 260f
+                            )
+                        )
+                )
+            }
+        }
+        // 压暗程度：叠加在材质层之上、内容之下——只压暗玻璃本身，不影响文字对比度
+        if (dim > 0f) {
+            Box(Modifier.matchParentSize().background(Color.Black.copy(alpha = dim)))
+        }
         content()
     }
 }
 
-/** 玻璃卡片：主题化半透明渐变 + 加强高光描边（顶亮底柔）+ 光影（顶部镜面高光/对角流光）+ 可选状态顶条。
- *  注：不再用 Modifier.shadow（透明玻璃会把投影透成整块暗斑），光影改用高光/流光覆盖层实现，不拦截点击。 */
+/** 玻璃卡片（全 app 通用卡片 = GlassSurface L1 + 可选状态顶条）。 */
 @Composable
 fun GlassCard(
     modifier: Modifier = Modifier,
     topStripe: Color? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    val c = LocalMonet.current
-    val shape = RoundedCornerShape(24.dp)
-    // 加强描边：比全局 c.rim 更亮（浅色 80% / 深色 25%），贴近 iOS 液态玻璃的锐利亮边
-    val rimStrong = if (c.isDark) Color(0x40FFFFFF) else Color(0xCCFFFFFF)
-    Box(
-        modifier
-            .clip(shape)
-            .background(glassBrush(c))
-            .border(1.5.dp, rimStrong, shape),
-    ) {
+    GlassSurface(modifier = modifier, tier = GlassTier.L1, shape = RoundedCornerShape(24.dp)) {
         Column(Modifier.padding(top = if (topStripe != null) 5.dp else 0.dp)) { content() }
-        // 光影①：顶部镜面高光（沿上缘向中部渐隐）
-        Box(Modifier.matchParentSize().background(
-            Brush.verticalGradient(
-                0f to Color.White.copy(alpha = if (c.isDark) 0.10f else 0.22f),
-                0.45f to Color.Transparent)))
-        // 光影②：对角流光（左上向下的轻微反光，增加玻璃体积感）
-        Box(Modifier.matchParentSize().background(
-            Brush.linearGradient(
-                0f to Color.White.copy(alpha = if (c.isDark) 0.05f else 0.12f),
-                0.28f to Color.Transparent,
-                start = Offset.Zero, end = Offset(1400f, 800f))))
         if (topStripe != null) {
             Box(Modifier.align(Alignment.TopCenter).fillMaxWidth().height(3.dp).background(topStripe))
         }
@@ -353,9 +641,116 @@ fun GlassCard(
 }
 
 /**
+ * L0 背景层 = 「壁纸舞台」（Edqiu GlassBackground 同构移植：双捕获层架构）。
+ *
+ * - **舞台捕获层**：「壁纸锐源 + scrim + 光斑」（无 blur），经 LocalStageBackdrop
+ *   提供给卡片做真折射采样——锐源才有可弯折的明暗与色彩；
+ * - **可见背景层**：壁纸 28dp 高斯虚化 + scrim + 光斑，人眼直接看的氛围层；
+ * - 无壁纸（自选未设置且系统壁纸读取失败）：落回「中性基底 + 局部光斑团」色场，
+ *   无缝降级（Edqiu 色场设计原则：基底永远中性，色彩只出现在局部光斑里）。
+ */
+@Composable
+fun StageBackground(modifier: Modifier = Modifier, blurRadius: Dp = 0.dp, content: @Composable BoxScope.() -> Unit) {
+    val c = eq()
+    val dark = c.isDark
+    val density = LocalDensity.current
+    val context = LocalContext.current
+    // 壁纸异步加载（IO decode）；version 变更（自选壁纸保存/清除）即强制重载，重载前保留旧图
+    val wallpaperVersion by StageWallpaper.version.collectAsState()
+    val wallpaper by androidx.compose.runtime.produceState<ImageBitmap?>(
+        initialValue = StageWallpaper.current, wallpaperVersion
+    ) {
+        value = StageWallpaper.load(context, force = wallpaperVersion > 0)
+    }
+
+    // 舞台捕获层：链内只有静态壁纸/scrim/光斑，不含卡片 → 无递归捕获
+    val stageBackdrop = rememberLayerBackdrop { drawContent() }
+    // 可读性 scrim：深色压暗 / 浅色提亮（Edqiu 2026-10-25 定档 0.35/0.34——文字在任意壁纸下可读）
+    val scrimColor = if (dark) Color.Black.copy(alpha = 0.34f) else Color.White.copy(alpha = 0.35f)
+    // 基底降级：中性面三段渐变（越往下越沉，给底部内容一个稳定的"地面"）
+    val baseGradient = Brush.verticalGradient(0f to c.bg, 0.6f to c.bg2, 1f to c.fill)
+    CompositionLocalProvider(LocalStageBackdrop provides stageBackdrop) {
+        BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+            val wPx = with(density) { maxWidth.toPx() }
+            val hPx = with(density) { maxHeight.toPx() }
+            val minPx = minOf(wPx, hPx)
+            // 光斑强度分主题：有壁纸时浅色近全强（0.9）、深色减半（0.5）
+            val spotScale = if (wallpaper != null) (if (dark) 0.5f else 0.9f) else 1f
+
+            // ── 舞台锐源层：drawBackdrop 采样源（无页面 blur，被可见层完全遮盖，仅作采样用）──
+            Box(modifier = Modifier.fillMaxSize().layerBackdrop(stageBackdrop)) {
+                if (wallpaper != null) {
+                    Image(
+                        bitmap = wallpaper!!,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        // 对齐桌面壁纸的顶部锚定（Crop 居中会把主体压到中下部，与桌面所见错位）
+                        alignment = Alignment.TopCenter,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                    Box(Modifier.fillMaxSize().background(scrimColor))
+                } else {
+                    Box(Modifier.fillMaxSize().background(baseGradient))
+                }
+                StageSpots(c, dark, wPx, hPx, minPx, spotScale)
+            }
+            // ── 可见背景层：壁纸 28dp 高斯虚化铺底（全屏层默认 clamp 正确用法）──
+            // blurRadius 作用于本层（柔化光斑边缘），不影响舞台锐源层与前景 content
+            Box(Modifier.fillMaxSize().let { if (blurRadius > 0.dp) it.blur(blurRadius) else it }) {
+                if (wallpaper != null) {
+                    Image(
+                        bitmap = wallpaper!!,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        alignment = Alignment.TopCenter,
+                        modifier = Modifier.fillMaxSize().blur(28.dp)
+                    )
+                    Box(Modifier.fillMaxSize().background(scrimColor))
+                } else {
+                    Box(Modifier.fillMaxSize().background(baseGradient))
+                }
+                StageSpots(c, dark, wPx, hPx, minPx, spotScale)
+            }
+            content()
+        }
+    }
+}
+
+/**
+ * 舞台光斑（Edqiu StageSpots 同构移植，舞台/可见双层共用）。
+ * 色场设计原则：基底中性，色彩只在局部光斑；每主题一明一暗一对团，
+ * 明暗差是玻璃「存在感」的第一来源（Apple 草地演示的核心）。
+ */
+@Composable
+private fun StageSpots(c: EqColors, dark: Boolean, wPx: Float, hPx: Float, minPx: Float, spotScale: Float) {
+    // 左上主光斑：primary 饱和团
+    Box(Modifier.fillMaxSize().background(Brush.radialGradient(
+        colors = listOf(c.primary.copy(alpha = (if (dark) 0.55f else 0.44f) * spotScale), Color.Transparent),
+        center = Offset(wPx * 0.15f, hPx * 0.10f), radius = minPx * 0.42f)))
+    // 右中次光斑：teal 青，与主光斑对角呼应
+    Box(Modifier.fillMaxSize().background(Brush.radialGradient(
+        colors = listOf(c.teal.copy(alpha = (if (dark) 0.45f else 0.40f) * spotScale), Color.Transparent),
+        center = Offset(wPx * 0.88f, hPx * 0.32f), radius = minPx * 0.38f)))
+    // 中部暗影团：深色 = 大黑团、浅色 = 灰影团——制造整屏唯一的大暗部
+    Box(Modifier.fillMaxSize().background(Brush.radialGradient(
+        colors = listOf((if (dark) Color.Black else Color(0xFF48484A))
+            .copy(alpha = (if (dark) 0.55f else 0.22f) * spotScale), Color.Transparent),
+        center = Offset(wPx * 0.50f, hPx * 0.54f), radius = minPx * 0.58f)))
+    // 左下小高光团：深色白光「物」/浅色主色补光
+    Box(Modifier.fillMaxSize().background(Brush.radialGradient(
+        colors = listOf((if (dark) Color.White else c.primary)
+            .copy(alpha = (if (dark) 0.10f else 0.28f) * spotScale), Color.Transparent),
+        center = Offset(wPx * 0.12f, hPx * 0.74f), radius = minPx * 0.30f)))
+    // 底部反光团：primary 回弹，给底栏玻璃一点色彩素材
+    Box(Modifier.fillMaxSize().background(Brush.radialGradient(
+        colors = listOf(c.primary.copy(alpha = (if (dark) 0.20f else 0.22f) * spotScale), Color.Transparent),
+        center = Offset(wPx * 0.78f, hPx * 0.90f), radius = minPx * 0.36f)))
+}
+
+
+/**
  * 空状态面板：轻玻璃容器 + 渐变圆标锚点 + 主/副文案 + 可选操作胶囊。
  * 收件箱、任务列表、素材库等空列表统一用它，替代裸文字提示。
- * compact=true 用于页内小节（如任务子页的进行中/历史）。
  */
 @Composable
 fun EmptyState(
@@ -367,7 +762,7 @@ fun EmptyState(
     compact: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
-    val c = LocalMonet.current
+    val c = eq()
     Box(
         modifier.fillMaxWidth()
             .clip(RoundedCornerShape(24.dp))
@@ -380,7 +775,6 @@ fun EmptyState(
         contentAlignment = Alignment.Center,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            // 视觉锚点：主色渐变玻璃圆 + emoji
             Box(
                 Modifier.size(if (compact) 46.dp else 62.dp)
                     .background(Brush.linearGradient(listOf(
@@ -403,7 +797,6 @@ fun EmptyState(
             }
             if (actionText.isNotBlank() && onAction != null) {
                 Spacer(Modifier.height(13.dp))
-                // 引导操作：primary 低透明胶囊（同「任务与历史」胶囊 tab 的取色语言）
                 Box(
                     Modifier.clip(RoundedCornerShape(100.dp))
                         .background(c.primary.copy(alpha = if (c.isDark) 0.24f else 0.11f))
@@ -420,61 +813,15 @@ fun EmptyState(
     }
 }
 
-/** 页头：眉题 + 大标题 + 计数 + 圆形操作按钮（玻璃底）。 */
-@Composable
-fun AppHeader(
-    eyebrow: String,
-    title: String,
-    count: String? = null,
-    onAction: (() -> Unit)? = null,
-    actionIcon: String = "↻",
-) {
-    val c = LocalMonet.current
-    Row(
-        Modifier.fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .background(glassBrush(c))
-            .border(1.dp, c.rim, RoundedCornerShape(20.dp))
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text(eyebrow, fontSize = 9.sp, letterSpacing = 3.sp,
-                fontWeight = FontWeight.Bold, color = c.primary)
-            Text(title, fontSize = 21.sp, fontWeight = FontWeight.Bold,
-                color = c.text, modifier = Modifier.padding(top = 1.dp))
-            if (count != null) {
-                Text(count, fontSize = 11.sp, color = c.faint, modifier = Modifier.padding(top = 1.dp))
-            }
-        }
-        if (onAction != null) {
-            Box(
-                Modifier.size(40.dp)
-                    .clip(RoundedCornerShape(13.dp))
-                    .background(c.fill)
-                    .border(1.dp, if (c.isDark) Color(0x33FFFFFF) else Color(0x0D16213E), RoundedCornerShape(13.dp))
-                    .clickable { onAction() },
-                contentAlignment = Alignment.Center,
-            ) { Text(actionIcon, fontSize = 16.sp, color = c.text2) }
-        }
-    }
-}
-
 /** 区块标题：竖条强调。 */
 @Composable
 fun SectionTitle(text: String, modifier: Modifier = Modifier) {
-    val c = LocalMonet.current
+    val c = eq()
     Row(modifier.padding(start = 6.dp, top = 4.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(4.dp, 14.dp).background(c.accent, RoundedCornerShape(3.dp)))
         Spacer(Modifier.width(8.dp))
         Text(text, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = c.text)
     }
-}
-
-/** 大标题（保留旧名）。 */
-@Composable
-fun LargeTitle(title: String, subtitle: String? = null) {
-    AppHeader(eyebrow = "MEDIA DOWNLOADER", title = title, count = subtitle)
 }
 
 /** 玻璃行：标题/副标题 + 尾部内容 + 行分隔线。 */
@@ -487,7 +834,7 @@ fun IosRow(
     content: @Composable (() -> Unit)? = null,
     destructive: Boolean = false,
 ) {
-    val c = LocalMonet.current
+    val c = eq()
     Row(
         Modifier.fillMaxWidth()
             .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
@@ -521,7 +868,7 @@ fun IosSegmented(
     onSelect: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val c = LocalMonet.current
+    val c = eq()
     BoxWithConstraints(
         modifier
             .background(c.fill, RoundedCornerShape(14.dp))
@@ -535,7 +882,6 @@ fun IosSegmented(
             animationSpec = spring(dampingRatio = 0.82f, stiffness = 480f),
             label = "seg",
         )
-        // 滑块层（在标签层之下，位移由 spring 驱动）
         Box(
             Modifier
                 .offset(x = sliderX)
@@ -544,7 +890,6 @@ fun IosSegmented(
                     Brush.linearGradient(listOf(c.primaryA, c.primary)),
                     RoundedCornerShape(11.dp)),
         )
-        // 标签层：热区与滑块严格对齐
         Row(Modifier.fillMaxWidth().height(segH),
             horizontalArrangement = Arrangement.spacedBy(gap)) {
             options.forEachIndexed { i, label ->
@@ -569,14 +914,14 @@ fun IosSegmented(
     }
 }
 
-/** iOS 风格自绘开关：spring 弹性位移 + 轨道颜色渐变 + 按压缩放反馈；轨道色随取色体系。 */
+/** iOS 风格自绘开关：spring 弹性位移 + 轨道颜色渐变 + 按压缩放反馈。 */
 @Composable
 fun IosSwitch(checked: Boolean, onChange: (Boolean) -> Unit, modifier: Modifier = Modifier) {
-    val c = LocalMonet.current
+    val c = eq()
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val w = 50.dp; val h = 30.dp; val thumb = 26.dp; val pad = 2.dp
-    val trans = updateTransition(targetState = checked, label = "iossw")
+    val trans = androidx.compose.animation.core.updateTransition(targetState = checked, label = "iossw")
     val tx by trans.animateDp(
         transitionSpec = { spring(dampingRatio = 0.72f, stiffness = 460f) },
         label = "tx",
@@ -611,7 +956,7 @@ fun IosSwitch(checked: Boolean, onChange: (Boolean) -> Unit, modifier: Modifier 
 /** 折叠指示 chevron：向右小箭头，展开时弹性旋转 90° 指向下；可作导航箭头（open=false）。 */
 @Composable
 fun Chevron(open: Boolean, modifier: Modifier = Modifier, tint: Color? = null) {
-    val c = LocalMonet.current
+    val c = eq()
     val rot by animateFloatAsState(
         if (open) 90f else 0f,
         spring(dampingRatio = 0.7f, stiffness = 380f), label = "chev")
@@ -629,24 +974,7 @@ fun Chevron(open: Boolean, modifier: Modifier = Modifier, tint: Color? = null) {
     }
 }
 
-/** 渐变主按钮（深蓝主色）。 */
-@Composable
-fun GradientButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    val c = LocalMonet.current
-    Box(
-        modifier
-            .background(
-                Brush.linearGradient(listOf(c.primaryA, c.primary, c.primaryDeep)),
-                RoundedCornerShape(16.dp))
-            .clickable { onClick() }
-            .padding(horizontal = 18.dp, vertical = 12.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(text, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-    }
-}
-
-/** 玻璃按钮：Primary=深蓝渐变主操作；Ghost=玻璃底次级操作。 */
+/** 玻璃按钮：Primary=主色渐变主操作；Ghost=玻璃底次级操作。 */
 @Composable
 fun GlassButton(
     text: String,
@@ -655,7 +983,7 @@ fun GlassButton(
     enabled: Boolean = true,
     kind: ButtonKind = ButtonKind.Primary,
 ) {
-    val c = LocalMonet.current
+    val c = eq()
     val shape = RoundedCornerShape(15.dp)
     val alpha = if (enabled) 1f else 0.4f
     val bg = if (kind == ButtonKind.Primary)
@@ -693,7 +1021,7 @@ fun GlassTextField(
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
     enabled: Boolean = true,
 ) {
-    val c = LocalMonet.current
+    val c = eq()
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
@@ -723,34 +1051,12 @@ fun GlassTextField(
     )
 }
 
-/** 玻璃筛选胶囊（on：accent 底白字；off：玻璃底 + 描边）。 */
-@Composable
-fun IosChip(label: String, selected: Boolean, onClick: () -> Unit) {
-    val c = LocalMonet.current
-    Box(
-        Modifier
-            .clip(RoundedCornerShape(100.dp))
-            .then(
-                if (selected) Modifier.background(c.accent)
-                else Modifier.background(
-                    if (c.isDark) Color(0x14FFFFFF) else Color(0x20FFFFFF))
-                    .border(1.dp, c.rim, RoundedCornerShape(100.dp)))
-            .clickable { onClick() }
-            .padding(horizontal = 14.dp, vertical = 7.dp),
-    ) {
-        Text(label, fontSize = 12.5.sp,
-            color = if (selected) Color.White else c.text2,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1)
-    }
-}
-
 /** 流光进度条：渐变填充 + 移动光斑；pct=null 时为不确定态（扫描动画）。 */
 @Composable
 fun IosProgress(pct: Float?, modifier: Modifier = Modifier, color: Color? = null) {
-    val c = LocalMonet.current
+    val c = eq()
     val base = color ?: c.primary
-    val trans = rememberInfiniteTransition(label = "pg")
+    val trans = androidx.compose.animation.core.rememberInfiniteTransition(label = "pg")
     val sweep by trans.animateFloat(
         initialValue = 0f, targetValue = 1f,
         animationSpec = infiniteRepeatable(tween(1700, easing = LinearEasing), RepeatMode.Restart),
@@ -773,7 +1079,6 @@ fun IosProgress(pct: Float?, modifier: Modifier = Modifier, color: Color? = null
                         startX = 0f, endX = with(density) { 220.dp.toPx() })))
             }
         } else {
-            // 不确定态：一段渐变沿轨道往复扫过
             val segFrac = 0.34f
             Box(Modifier.fillMaxWidth(segFrac).fillMaxHeight()
                 .offset { IntOffset((sweep * (1f - segFrac) * pxW).roundToInt(), 0) }
@@ -781,7 +1086,6 @@ fun IosProgress(pct: Float?, modifier: Modifier = Modifier, color: Color? = null
                     listOf(base.copy(alpha = 0.35f), base, base.copy(alpha = 0.35f)),
                     startX = 0f, endX = with(density) { 140.dp.toPx() })))
         }
-        // 光斑
         Box(Modifier.matchParentSize()) {
             Box(Modifier.matchParentSize()
                 .offset { IntOffset((sweep * pxW).roundToInt(), 0) }
@@ -804,7 +1108,7 @@ fun StatusPill(text: String, color: Color) {
 /** 平台徽章（品牌色淡底）。 */
 @Composable
 fun PlatBadge(platform: String) {
-    val c = LocalMonet.current
+    val c = eq()
     val color = when (platform) {
         "twitter" -> c.text
         "instagram" -> IgColor
@@ -824,156 +1128,227 @@ fun PlatBadge(platform: String) {
     )
 }
 
-// ---------------- 底部液态玻璃 Tab 栏（iOS 26 Liquid Glass） ----------------
+// ---------------- 液态玻璃 Tab 栏（Edqiu LiquidTabBar 移植） ----------------
 
-/** 底栏图标类型（自绘矢量，与 Chevron 同一圆头描边语言）。 */
+/** 底栏图标类型（自绘矢量：圆头描边语言）。 */
 enum class TabIconType { Download, Library, Globe, Gear }
 
-/** 底栏矢量图标：24 单位视口缩放绘制，1.9dp 圆头描边。 */
+/** 底栏矢量图标：24 单位视口，2.0 圆头描边。 */
 @Composable
 fun TabIcon(type: TabIconType, color: Color, modifier: Modifier = Modifier) {
-    Canvas(modifier.size(23.dp)) {
+    Canvas(modifier.size(21.dp)) {
         val s = size.minDimension / 24f
         scale(s, pivot = Offset.Zero) {
-            val stroke = Stroke(width = 1.9f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+            val stroke = Stroke(width = 2.0f, cap = StrokeCap.Round, join = StrokeJoin.Round)
             when (type) {
                 TabIconType.Download -> {
-                    // 托盘：U 形圆角底
+                    // 收件筐：左侧竖壁 + 顶部 + 右侧圆角 + 底部开口（Edqiu E 化收件筐语言）
                     drawPath(Path().apply {
-                        moveTo(5f, 13.6f)
-                        lineTo(5f, 16.4f)
-                        quadraticTo(5f, 19.2f, 7.8f, 19.2f)
-                        lineTo(16.2f, 19.2f)
-                        quadraticTo(19f, 19.2f, 19f, 16.4f)
-                        lineTo(19f, 13.6f)
+                        moveTo(5f, 4f)
+                        lineTo(16f, 4f)
+                        quadraticTo(19f, 4f, 19f, 7f)
+                        lineTo(19f, 13f)
+                        quadraticTo(19f, 16f, 16f, 16f)
+                        lineTo(9f, 16f)
                     }, color, style = stroke)
-                    // 下箭头
+                    // 内部层板两道
+                    drawLine(color, Offset(5f, 9f), Offset(13f, 9f),
+                        strokeWidth = 2.0f, cap = StrokeCap.Round)
+                    drawLine(color, Offset(5f, 13.5f), Offset(15f, 13.5f),
+                        strokeWidth = 2.0f, cap = StrokeCap.Round)
+                    // 左竖壁延伸到开口
+                    drawLine(color, Offset(5f, 4f), Offset(5f, 16f),
+                        strokeWidth = 2.0f, cap = StrokeCap.Round)
+                    // 放入箭头（筐口向下）
                     drawPath(Path().apply {
-                        moveTo(12f, 4.4f)
-                        lineTo(12f, 13.8f)
-                        moveTo(8.4f, 10.4f)
-                        lineTo(12f, 14f)
-                        lineTo(15.6f, 10.4f)
+                        moveTo(15.5f, 18.5f)
+                        lineTo(17.5f, 20.5f)
+                        lineTo(21f, 16.5f)
                     }, color, style = stroke)
                 }
                 TabIconType.Library -> {
-                    // 2×2 圆角网格（媒体墙），光学居中外扩
-                    val cell = Size(6.8f, 6.8f)
-                    val r = CornerRadius(2.4f, 2.4f)
-                    listOf(3.6f to 3.6f, 13.6f to 3.6f, 3.6f to 13.6f, 13.6f to 13.6f).forEach { (x, y) ->
-                        drawRoundRect(color, topLeft = Offset(x, y), size = cell,
-                            cornerRadius = r, style = stroke)
-                    }
+                    // 照片框：圆角矩形 + 太阳 + 山形（媒体墙语义）
+                    drawPath(Path().apply {
+                        moveTo(8f, 4f)
+                        lineTo(17f, 4f)
+                        quadraticTo(20f, 4f, 20f, 7f)
+                        lineTo(20f, 14f)
+                        quadraticTo(20f, 17f, 17f, 17f)
+                        lineTo(8f, 17f)
+                        quadraticTo(5f, 17f, 5f, 14f)
+                        lineTo(5f, 7f)
+                        quadraticTo(5f, 4f, 8f, 4f)
+                        close()
+                    }, color, style = stroke)
+                    drawCircle(color, radius = 1.6f, center = Offset(9.6f, 8.6f), style = stroke)
+                    drawPath(Path().apply {
+                        moveTo(5.6f, 14.6f)
+                        lineTo(9.4f, 11.2f)
+                        lineTo(13f, 14.4f)
+                        lineTo(15.6f, 12.2f)
+                        lineTo(20f, 15.8f)
+                    }, color, style = stroke)
                 }
                 TabIconType.Globe -> {
                     // 地球：外圆 + 赤道线 + 经线椭圆（代理=网络中转）
                     val o = Offset(12f, 12f)
                     drawCircle(color, radius = 8.2f, center = o, style = stroke)
                     drawLine(color, Offset(3.8f, 12f), Offset(20.2f, 12f),
-                        strokeWidth = 1.9f, cap = StrokeCap.Round)
+                        strokeWidth = 2.0f, cap = StrokeCap.Round)
                     drawOval(color, topLeft = Offset(8.2f, 3.8f),
                         size = Size(7.6f, 16.4f), style = stroke)
                 }
                 TabIconType.Gear -> {
-                    val o = Offset(12f, 12f)
-                    drawCircle(color, radius = 6.9f, center = o, style = stroke)
-                    drawCircle(color, radius = 2.7f, center = o, style = stroke)
-                    for (i in 0..7) {
-                        rotate(i * 45f, pivot = o) {
-                            drawLine(color,
-                                Offset(12f, 12f - 6.9f), Offset(12f, 12f - 10.3f),
-                                strokeWidth = 1.9f, cap = StrokeCap.Round)
-                        }
-                    }
+                    // 滑杆（设置）：三道横杆 + 错位圆钮，比齿轮更轻盈现代
+                    drawLine(color, Offset(4.5f, 7f), Offset(19.5f, 7f),
+                        strokeWidth = 2.0f, cap = StrokeCap.Round)
+                    drawLine(color, Offset(4.5f, 12f), Offset(19.5f, 12f),
+                        strokeWidth = 2.0f, cap = StrokeCap.Round)
+                    drawLine(color, Offset(4.5f, 17f), Offset(19.5f, 17f),
+                        strokeWidth = 2.0f, cap = StrokeCap.Round)
+                    drawCircle(color, radius = 2.3f, center = Offset(15.2f, 7f), style = stroke)
+                    drawCircle(color, radius = 2.3f, center = Offset(8.6f, 12f), style = stroke)
+                    drawCircle(color, radius = 2.3f, center = Offset(16.6f, 17f), style = stroke)
                 }
             }
         }
     }
 }
 
-/** 悬浮液态玻璃底栏（iOS 26 Liquid Glass）：
- *  高透明玻璃条（页面内容从后透出）+ 顶部光泽 + spring 弹性滑动的液态选中药丸（滑动时拉伸回弹）+ 自绘矢量图标。 */
+/**
+ * 悬浮液态玻璃 Tab 栏（Edqiu LiquidTabBar 同款）：
+ * 高 50dp stadium 玻璃外壳，选中胶囊随按压缩放滑动、圆角贴边变形（16→22dp），
+ * 文字仅选中项出现（9sp Bold），图标 21dp 选中放大 1.12。
+ */
 @Composable
 fun GlassTabBar(
     labels: List<String>,
     selected: Int,
     modifier: Modifier = Modifier,
+    badgeCount: Int = 0,
     onSelect: (Int) -> Unit,
 ) {
-    val c = LocalMonet.current
-    val shape = RoundedCornerShape(28.dp)
-    // 液态玻璃条材质：比旧版大幅透明（上亮下沉纵向渐变）
-    val barBrush = if (c.isDark)
-        Brush.verticalGradient(listOf(Color(0x591E2C4C), Color(0x33142038)))
-    else Brush.verticalGradient(listOf(Color(0x70FFFFFF), Color(0x45FFFFFF)))
+    val c = eq()
+
     BoxWithConstraints(
-        modifier
+        modifier = modifier
             .fillMaxWidth()
-            .height(56.dp)
-            .shadow(18.dp, shape, ambientColor = c.glow, spotColor = c.glow)
-            .clip(shape)
-            .background(barBrush)
-            .border(1.dp, c.rim, shape),
+            .height(50.dp)
+            .padding(horizontal = 14.dp)
     ) {
-        // 顶部玻璃光泽（浅色主题更亮的镜面反光）
-        Box(Modifier.matchParentSize().background(Brush.verticalGradient(
-            0f to Color.White.copy(alpha = if (c.isDark) 0.14f else 0.50f),
-            0.45f to Color.Transparent)))
-        // 液态选中药丸：spring 位移（低阻尼 → 过冲回弹），|当前-目标| 驱动拉伸/挤压形变
-        val slotW = maxWidth / labels.size
-        val targetX = slotW * selected
-        val x by animateDpAsState(targetValue = targetX,
-            animationSpec = spring(dampingRatio = 0.52f, stiffness = 340f), label = "tabPillX")
-        val stretch = ((targetX - x).value / slotW.value).let { kotlin.math.abs(it) }
-            .coerceIn(0f, 1f)
+        val barWidth = maxWidth
+        val itemWidth = barWidth / labels.size
+
+        var pressedIndex by remember { mutableStateOf(-1) }
+        val capsuleIndex = if (pressedIndex >= 0) pressedIndex else selected
+        val capsuleTargetX = itemWidth * capsuleIndex
+        val capsuleX by animateFloatAsState(
+            targetValue = capsuleTargetX.value,
+            animationSpec = if (pressedIndex >= 0) tween(50)
+            else spring(dampingRatio = 0.8f, stiffness = 260f),
+            label = "capsuleX")
+
+        // 选中胶囊圆角动态贴合外壳内壁（滑到两端时 16→22dp stadium，弧线同心）
+        val tabCount = labels.size
+        val barCenterX = itemWidth.value * tabCount / 2f
+        val capsuleCenterX = capsuleX + itemWidth.value / 2f
+        val halfSpan = (barCenterX - itemWidth.value / 2f).coerceAtLeast(1f)
+        val edgeT = abs(capsuleCenterX - barCenterX) / halfSpan
+        val capsuleRadius by animateFloatAsState(
+            targetValue = 16f + edgeT.coerceIn(0f, 1f) * 6f,
+            animationSpec = spring(dampingRatio = 0.85f, stiffness = 600f),
+            label = "capsuleRadius")
+
+        // 玻璃外壳（Edqiu 底栏定版参数）：Backdrop 真折射 vibrancy+blur+lens，
+        // 透出并折射正下方滚动的页面内容；<33/关闭时回退渐变模拟玻璃。
+        // 固定 8dp 轻磨砂——全局 0.6 档会把滚入底栏的文字糊成色块（透色不透字）；
+        // 无描边无白线（用户反馈定版），透光 boost 0.5 内容从底栏下穿透可辨
+        GlassOverlaySurface(
+            shape = RoundedCornerShape(25.dp),
+            style = OverlayGlassStyle.Light,
+            blurRadius = 8.dp,
+            lensHeight = 14.dp,
+            lensAmount = 16.dp,
+            transparencyBoost = 0.5f,
+            showEdgeAccent = false,
+            showSheen = false,
+            modifier = Modifier.fillMaxSize(),
+        ) { }
+
+        // 选中胶囊：primary 低透明色洗（2026-10-24 按钮透明可观重做）——
+        // 内容从胶囊下穿透可辨，选中态由主题色 tint（图标/文字转 primary）承担
         Box(
-            Modifier
-                .offset(x = x)
-                .width(slotW)
+            modifier = Modifier
+                .offset(x = capsuleX.dp)
+                .width(itemWidth)
                 .fillMaxHeight()
-                .graphicsLayer {
-                    scaleX = 1f + stretch * 0.12f
-                    scaleY = 1f - stretch * 0.07f
-                }
-                .padding(4.dp)
-                .clip(RoundedCornerShape(23.dp))
-                .background(c.primary.copy(alpha = if (c.isDark) 0.32f else 0.13f))
-                .border(1.dp, c.primary.copy(alpha = if (c.isDark) 0.40f else 0.20f),
-                    RoundedCornerShape(23.dp)),
+                .padding(horizontal = 3.dp, vertical = 3.dp)
+                .clip(RoundedCornerShape(capsuleRadius.dp))
+                .background(c.primary.copy(alpha = if (c.isDark) 0.38f else 0.28f)),
+        )
+
+        Row(
+            modifier = Modifier.fillMaxSize(),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            // 药丸凸起高光（液态玻璃体积感）
-            Box(Modifier.matchParentSize().clip(RoundedCornerShape(23.dp)).background(
-                Brush.verticalGradient(
-                    0f to Color.White.copy(alpha = if (c.isDark) 0.20f else 0.60f),
-                    0.5f to Color.Transparent)))
-        }
-        // 标签层
-        Row(Modifier.fillMaxSize()) {
-            labels.forEachIndexed { i, label ->
-                val on = i == selected
+            labels.forEachIndexed { index, label ->
+                val on = index == selected
+                val iconScale by animateFloatAsState(
+                    targetValue = if (on) 1.12f else 1f,
+                    animationSpec = spring(dampingRatio = 0.7f, stiffness = 900f),
+                    label = "scale$index")
                 val iconColor by animateColorAsState(
                     if (on) c.primary else c.faint, tween(200), label = "tabIc")
-                val iconScale by animateFloatAsState(
-                    if (on) 1.08f else 1f,
-                    spring(dampingRatio = 0.55f, stiffness = 520f), label = "tabIcS")
                 Box(
-                    Modifier.weight(1f).fillMaxSize()
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxSize()
+                        .semantics { role = Role.Tab }
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null,
-                        ) { onSelect(i) },
+                            onClick = { onSelect(index) },
+                        ),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Box(Modifier.graphicsLayer { scaleX = iconScale; scaleY = iconScale }) {
-                            TabIcon(TabIconType.entries[i], iconColor)
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                        modifier = Modifier.graphicsLayer { scaleX = iconScale; scaleY = iconScale },
+                    ) {
+                        TabIcon(TabIconType.entries[index], iconColor)
+                        AnimatedVisibility(
+                            visible = on,
+                            enter = fadeIn(tween(180)) + slideInVertically(tween(180)) { it / 3 },
+                            exit = fadeOut(tween(100)) + slideOutVertically(tween(100)) { it / 3 },
+                        ) {
+                            Text(
+                                text = label,
+                                color = c.primary,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                lineHeight = 11.sp,
+                                modifier = Modifier.padding(top = 1.dp),
+                                maxLines = 1,
+                            )
                         }
-                        Spacer(Modifier.height(2.dp))
-                        Text(label, fontSize = 10.5.sp, lineHeight = 12.sp,
-                            fontWeight = if (on) FontWeight.Bold else FontWeight.Medium,
-                            color = if (on) c.primary else c.faint, maxLines = 1)
                     }
                 }
+            }
+        }
+
+        if (badgeCount > 0) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 2.dp, end = 2.dp)
+                    .size(18.dp)
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(Color(0xFFFF3B30)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(badgeCount.toString(), color = Color.White,
+                    fontSize = 9.sp, fontWeight = FontWeight.Bold)
             }
         }
     }

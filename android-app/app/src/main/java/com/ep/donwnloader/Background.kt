@@ -16,6 +16,9 @@ import java.util.concurrent.TimeUnit
 class OptimizeWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
     override suspend fun doWork(): Result {
         Store.init(applicationContext)
+        // 外部目录周期监控（Bug1 修复）：属主 App（Edqiu）新下载的文件后台增量入库。
+        // 独立于代理优选开关——登记素材不应取决于「自动优选」是否打开。
+        withContext(Dispatchers.IO) { runCatching { Store.tasks.autoSyncExternal() } }
         if (!Store.prefs.autoOptimize) return Result.success()
         if (Store.proxy.testing.value) return Result.success()
         // 移动数据下后台只测延迟不跑吞吐，避免后台流量激增

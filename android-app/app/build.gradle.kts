@@ -22,8 +22,8 @@ android {
         applicationId = "com.ep.donwnloader"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "1.2.0"
+        versionCode = 4
+        versionName = "1.3.0"
         ndk {
             // Python 解释器是原生组件：真机 arm64 + 模拟器 x86_64（无需安装 NDK）
             abiFilters += listOf("arm64-v8a", "x86_64")
@@ -41,8 +41,11 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions {
-        jvmTarget = "17"
+    // Kotlin 2.4：kotlinOptions DSL 已移除，统一 compilerOptions
+    kotlin {
+        compilerOptions {
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+        }
     }
     buildFeatures {
         compose = true
@@ -72,6 +75,8 @@ dependencies {
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
+    // M11：液态玻璃真折射框架（Kyant0/AndroidLiquidGlass，AGSL vibrancy/blur/lens）
+    implementation(libs.kyant.backdrop)
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("androidx.security:security-crypto:1.1.0-alpha06")   // P0：凭据 EncryptedSharedPreferences（Keystore 主密钥）

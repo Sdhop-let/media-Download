@@ -656,6 +656,8 @@ class TaskManager {
         val cancelled: Boolean = false,
         /** 本次待登记候选总数（指纹+登记两阶段的进度分母）。 */
         val total: Int = 0,
+        /** 陈旧登记清扫：目录里已消失的文件被解除登记的条数（Bug1 后半，2026-10-25）。 */
+        val stale: Int = 0,
     )
 
     /** Edqiu sidecar（.meta.json）关键字段。 */
@@ -779,7 +781,8 @@ class TaskManager {
     /**
      * 外部目录同步（2026-09-11 root 直读改造）：扫描目录（含子目录）中的图片/视频，
      * 三级识别后【登记进素材库，文件保留原位】——外部目录归其属主 App（如 Edqiu）持续管理，
-     * 本 App 只做只读引用：属主新下载的文件，下次同步自动增量入账。
+     * 本 App 只做只读引用：属主新下载的文件，下次同步自动增量入账；
+     * 属主删除/清空的文件，同步时自动清扫失效登记（2026-10-25，库与目录保持一致）。
      * 读通道：File API 可读走本地；不可读（Android/data 私有目录）+ 已 root 走 su 直读——
      * 目录枚举/size/mtime 单次命令直出、sidecar 文本 su cat、哈希 md5sum 远端直出，
      * 【零镜像零复制】，登记 file_path = 原路径。
@@ -796,7 +799,42 @@ class TaskManager {
      * 部分报告（已入库条目保留，refresh 保证 UI 一致，再同步幂等续传）；onProgress 按
      * phase="hash"（校验指纹）/ "register"（登记）上报 done/total 与已入库数。
      */
+    /** 同步互斥门：自动同步（启动/后台周期）与手动同步共用，进行中再入直接失败，防并发双写。 */
+    private val syncRunning = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /**
+     * 外部目录自动监控入口（Bug1 修复，2026-10-25）：对已登记目录（prefs.syncDir）做
+     * 静默增量登记——启动时（Store.init）与后台周期（OptimizeWorker）各触发一次。
+     * 属主 App（Edqiu）新下载的文件由此自动入账，不再依赖用户手动点「开始同步」。
+     * 无登记目录 / 目录不可达 / 同步进行中：静默跳过（自动通道不打扰用户）。
+     */
+    fun autoSyncExternal(): ExternalSyncReport? {
+        val dir = runCatching { Store.prefs.syncDir }.getOrNull()?.trim().orEmpty()
+        if (dir.isBlank()) return null
+        return try {
+            syncExternalDir(dir)
+        } catch (e: Exception) {
+            android.util.Log.w("TaskManager", "autoSyncExternal: ${e.message}")
+            null
+        }
+    }
+
+    /** 手动/自动统一入口：互斥后转发给 [syncExternalDirLocked]。 */
     fun syncExternalDir(
+        dirPath: String,
+        isCancelled: () -> Boolean = { false },
+        onProgress: (phase: String, done: Int, total: Int, registered: Int) -> Unit = { _, _, _, _ -> },
+    ): ExternalSyncReport {
+        if (!syncRunning.compareAndSet(false, true))
+            throw Exception("已有同步在进行，请稍后再试")
+        try {
+            return syncExternalDirLocked(dirPath, isCancelled, onProgress)
+        } finally {
+            syncRunning.set(false)
+        }
+    }
+
+    private fun syncExternalDirLocked(
         dirPath: String,
         isCancelled: () -> Boolean = { false },
         onProgress: (phase: String, done: Int, total: Int, registered: Int) -> Unit = { _, _, _, _ -> },
@@ -810,6 +848,7 @@ class TaskManager {
         }
         var registered = 0; var skippedDup = 0
         var authorized = 0; var tweetOnly = 0; var plain = 0
+        var staleCount = 0
 
         // 统一候选抽象：File 通道与 root 通道都产出 (path, size, mtime, sidecarPath)
         data class Cand(val path: String, val size: Long, val mtimeMs: Long, val sidecarPath: String?)
@@ -832,6 +871,28 @@ class TaskManager {
             }
         }
 
+        // 陈旧登记清扫（Bug1 后半，2026-10-25）：登记过的文件已从目录消失 → 硬删登记行 + 清缩略图。
+        // 与「移除该目录登记」同语义（posts/authors 留孤儿，再同步可复用；含回收站条目）。
+        // 安全前提：走到这里目录枚举必然成功（useApi 已过 isDirectory；root 通道 listTree 失败早已
+        // 抛 UNREACHABLE），存在性判定与登记同源——File.exists / 全量枚举集合，临时不可读不会被误判为已删除。
+        val appBase = Store.appContext.getExternalFilesDir(null)?.absolutePath?.trimEnd('/') ?: ""
+        val rootExists: (String) -> Boolean
+        if (useApi) {
+            rootExists = { p -> File(p).exists() }
+        } else {
+            val entryPaths = entries!!.mapTo(HashSet()) { it.path }
+            rootExists = { p -> entryPaths.contains(p) }
+        }
+        val staleRows = Store.db.externalDirRows(root.trimEnd('/'), appBase)
+            .filter { (_, path, _) -> cands.none { it.path == path } && !rootExists(path) }
+        staleCount = staleRows.size
+        if (staleRows.isNotEmpty()) {
+            staleRows.forEach { (_, _, thumb) -> if (thumb.isNotBlank()) MediaFiles.deleteDisk(thumb) }
+            Store.db.hardDeleteMedia(staleRows.map { it.first })
+            android.util.Log.i("TaskManager",
+                "syncExternalDir: 清扫失效登记 ${staleRows.size} 条（文件已从目录消失）")
+        }
+
         // 幂等：原路径已登记 → 跳过（root 直读登记原路径，二次同步天然幂等）
         val fresh = cands.filter { !Store.db.mediaPathRegistered(it.path) }
         val total = fresh.size
@@ -849,7 +910,7 @@ class TaskManager {
             refresh()
             if (registered > 0) Store.mediaVersion++
             return ExternalSyncReport(registered, skippedDup, authorized, tweetOnly, plain,
-                !useApi, cancelled = true, total = total)
+                !useApi, cancelled = true, total = total, stale = staleCount)
         }
 
         // 内容级去重：批量哈希（File 通道本地算；root 通道远端 md5sum 直出，零内容传输）
@@ -925,9 +986,9 @@ class TaskManager {
             onProgress("register", idx + 1, total, registered)
         }
         refresh()
-        if (registered > 0) Store.mediaVersion++
+        if (registered > 0 || staleCount > 0) Store.mediaVersion++
         return ExternalSyncReport(registered, skippedDup, authorized, tweetOnly, plain,
-            !useApi, cancelled = cancelled, total = total)
+            !useApi, cancelled = cancelled, total = total, stale = staleCount)
     }
 
     /**

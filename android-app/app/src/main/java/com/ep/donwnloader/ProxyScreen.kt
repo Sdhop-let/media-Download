@@ -103,7 +103,7 @@ fun ProxyScreen() {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("⚠ ", color = ErrColor, fontSize = 14.sp)
                         Text(err, style = MaterialTheme.typography.bodySmall,
-                            color = if (LocalMonet.current.isDark) Color(0xFFF0A6A6) else Color(0xFFB03A34),
+                            color = if (LocalEq.current.isDark) Color(0xFFF0A6A6) else Color(0xFFB03A34),
                             modifier = Modifier.weight(1f))
                         GlassButton("重试", onClick = {
                             scope.launch(Dispatchers.IO) {
@@ -316,7 +316,7 @@ fun ProxyScreen() {
                             },
                                 color = when {
                                     isBest -> OkColor
-                                    else -> ios().faint
+                                    else -> eq().faint
                                 },
                                 style = MaterialTheme.typography.labelSmall)
                         }
@@ -365,7 +365,7 @@ fun ProxyScreen() {
     }
 
     // 粘贴 Clash 配置弹层
-    if (pasteOpen) {        val c = ios()
+    if (pasteOpen) {        val c = eq()
         ModalBottomSheet(
             onDismissRequest = { pasteOpen = false },
             containerColor = if (c.isDark) Color(0xF20E1830) else Color(0xCDF4F8FE),
@@ -399,7 +399,7 @@ fun ProxyScreen() {
 
     // URL 导入弹层：拉取订阅/配置内容再解析
     if (urlOpen) {
-        val c = ios()
+        val c = eq()
         ModalBottomSheet(
             onDismissRequest = { urlOpen = false },
             containerColor = if (c.isDark) Color(0xF20E1830) else Color(0xCDF4F8FE),

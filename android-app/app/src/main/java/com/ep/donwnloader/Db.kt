@@ -272,21 +272,21 @@ class Db(context: Context) : SQLiteOpenHelper(context, "app.db", null, 7) {
         if (uid.isNotBlank()) {
             readableDatabase.rawQuery(
                 "SELECT id, handle FROM authors WHERE platform=? AND platform_uid=? LIMIT 1",
-                arrayOf(platform, uid)).use { c ->
+                arrayOf<String>(platform, uid)).use { c ->
                 if (c.moveToFirst()) {
                     val aid = c.getLong(0)
                     val old = c.getString(1) ?: ""
                     if (old.isNotBlank() && old != handle) {
                         db.execSQL(
                             "INSERT OR IGNORE INTO author_aliases(platform, handle, author_id) VALUES(?,?,?)",
-                            arrayOf(platform, old, aid))
+                            arrayOf<Any?>(platform, old, aid))
                         // 新 handle 未被其他行占用才更名（撞名极罕见，保持旧行不动）
                         db.execSQL(
                             """UPDATE authors SET handle=?
                                WHERE id=? AND NOT EXISTS(
                                  SELECT 1 FROM authors a2
                                  WHERE a2.platform=? AND a2.handle=? AND a2.id!=?)""",
-                            arrayOf(handle, aid, platform, handle, aid))
+                            arrayOf<Any?>(handle, aid, platform, handle, aid))
                     }
                     db.execSQL(
                         """UPDATE authors SET
@@ -294,18 +294,18 @@ class Db(context: Context) : SQLiteOpenHelper(context, "app.db", null, 7) {
                           avatar_url = CASE WHEN ?!='' THEN ? ELSE avatar_url END,
                           profile_url = CASE WHEN ?!='' THEN ? ELSE profile_url END
                           WHERE id=?""",
-                        arrayOf(name, name, avatar, avatar, profile, profile, aid))
+                        arrayOf<Any?>(name, name, avatar, avatar, profile, profile, aid))
                     return aid
                 }
             }
         }
         val hitId = readableDatabase.rawQuery(
             "SELECT id FROM authors WHERE platform=? AND handle=? LIMIT 1",
-            arrayOf(platform, handle)).use { if (it.moveToFirst()) it.getLong(0) else -1L }
+            arrayOf<String>(platform, handle)).use { if (it.moveToFirst()) it.getLong(0) else -1L }
         if (hitId > 0) {
             if (uid.isNotBlank()) {
                 db.execSQL("UPDATE authors SET platform_uid=? WHERE id=? AND platform_uid=''",
-                    arrayOf(uid, hitId))
+                    arrayOf<Any?>(uid, hitId))
             }
             db.execSQL(
                 """UPDATE authors SET
@@ -313,15 +313,15 @@ class Db(context: Context) : SQLiteOpenHelper(context, "app.db", null, 7) {
                   avatar_url = CASE WHEN ?!='' THEN ? ELSE avatar_url END,
                   profile_url = CASE WHEN ?!='' THEN ? ELSE profile_url END
                   WHERE id=?""",
-                arrayOf(name, name, avatar, avatar, profile, profile, hitId))
+                arrayOf<Any?>(name, name, avatar, avatar, profile, profile, hitId))
             return hitId
         }
         db.execSQL(
             """INSERT INTO authors(platform, handle, platform_uid, name, avatar_url, profile_url)
                VALUES(?,?,?,?,?,?)""",
-            arrayOf(platform, handle, uid, name, avatar, profile))
+            arrayOf<Any?>(platform, handle, uid, name, avatar, profile))
         return readableDatabase.rawQuery(
-            "SELECT id FROM authors WHERE platform=? AND handle=?", arrayOf(platform, handle)).use {
+            "SELECT id FROM authors WHERE platform=? AND handle=?", arrayOf<String>(platform, handle)).use {
             it.moveToFirst(); it.getLong(0)
         }
     }
@@ -332,9 +332,9 @@ class Db(context: Context) : SQLiteOpenHelper(context, "app.db", null, 7) {
             ON CONFLICT(platform, post_id) DO UPDATE SET
               post_url = CASE WHEN excluded.post_url!='' THEN excluded.post_url ELSE posts.post_url END,
               created_at = CASE WHEN excluded.created_at!='' THEN excluded.created_at ELSE posts.created_at END""",
-            arrayOf(platform, postId, postUrl, authorId, createdAt, text))
+            arrayOf<Any?>(platform, postId, postUrl, authorId, createdAt, text))
         return readableDatabase.rawQuery(
-            "SELECT id FROM posts WHERE platform=? AND post_id=?", arrayOf(platform, postId)).use {
+            "SELECT id FROM posts WHERE platform=? AND post_id=?", arrayOf<String>(platform, postId)).use {
             it.moveToFirst(); it.getLong(0)
         }
     }
@@ -342,7 +342,7 @@ class Db(context: Context) : SQLiteOpenHelper(context, "app.db", null, 7) {
     /** 记录帖子归属到下载任务（后下载的任务覆盖旧归属，删除旧任务不会误删仍在库的素材）。 */
     fun attachPostToTask(postRowId: Long, taskId: Long) {
         writableDatabase.execSQL("UPDATE posts SET task_id=? WHERE id=?",
-            arrayOf(taskId.toString(), postRowId.toString()))
+            arrayOf<Any?>(taskId.toString(), postRowId.toString()))
     }
 
     /** 删除任务时级联软删其产生的素材（进回收站，可恢复）。 */
@@ -351,7 +351,7 @@ class Db(context: Context) : SQLiteOpenHelper(context, "app.db", null, 7) {
         writableDatabase.execSQL(
             "UPDATE media SET deleted=1, deleted_at=? WHERE deleted=0 AND post_row_id IN " +
                 "(SELECT id FROM posts WHERE task_id=?)",
-            arrayOf(now, taskId.toString()))
+            arrayOf<Any?>(now, taskId.toString()))
     }
 
     /** mediaIndex 传 -1 = 自动分配（nextMediaIndex：同帖现有最大值+1，回收站条目也占位）。
@@ -379,14 +379,14 @@ class Db(context: Context) : SQLiteOpenHelper(context, "app.db", null, 7) {
     fun nextMediaIndex(postRowId: Long): Int =
         readableDatabase.rawQuery(
             "SELECT COALESCE(MAX(media_index),-1)+1 FROM media WHERE post_row_id=?",
-            arrayOf(postRowId.toString())).use { it.moveToFirst(); it.getInt(0) }
+            arrayOf<String>(postRowId.toString())).use { it.moveToFirst(); it.getInt(0) }
 
     /** 内容 hash 查重（IG p/reel 裂帖等场景归并依据）。返回 (mediaId, postRowId, deleted)；null=无重复。 */
     fun findByHash(hash: String): Triple<Long, Long, Boolean>? {
         if (hash.isBlank()) return null
         return readableDatabase.rawQuery(
             "SELECT id, post_row_id, deleted FROM media WHERE content_hash=? LIMIT 1",
-            arrayOf(hash)).use {
+            arrayOf<String>(hash)).use {
             if (it.moveToFirst()) Triple(it.getLong(0), it.getLong(1), it.getInt(2) == 1) else null
         }
     }
@@ -395,7 +395,7 @@ class Db(context: Context) : SQLiteOpenHelper(context, "app.db", null, 7) {
      *  旧文件若在别处且仍存在则顺带清掉，防孤儿。 */
     fun updateMediaRow(id: Long, filePath: String, fileSize: Long, thumbPath: String, contentHash: String) {
         val old = readableDatabase.rawQuery(
-            "SELECT file_path FROM media WHERE id=?", arrayOf(id.toString())).use {
+            "SELECT file_path FROM media WHERE id=?", arrayOf<String>(id.toString())).use {
             if (it.moveToFirst()) it.getString(0) ?: "" else ""
         }
         if (old.isNotBlank() && old != filePath && java.io.File(old).exists()) {
@@ -406,13 +406,13 @@ class Db(context: Context) : SQLiteOpenHelper(context, "app.db", null, 7) {
             put("thumb_path", thumbPath); put("content_hash", contentHash)
             put("downloaded_at", nowIso())
         }
-        writableDatabase.update("media", cv, "id=?", arrayOf(id.toString()))
+        writableDatabase.update("media", cv, "id=?", arrayOf<String>(id.toString()))
     }
 
     /** 回写缩略图路径（视频封面惰性补生成后调用）。 */
     fun updateMediaThumb(id: Long, thumbPath: String) {
         val cv = ContentValues().apply { put("thumb_path", thumbPath) }
-        writableDatabase.update("media", cv, "id=?", arrayOf(id.toString()))
+        writableDatabase.update("media", cv, "id=?", arrayOf<String>(id.toString()))
     }
 
     /**
@@ -426,7 +426,7 @@ class Db(context: Context) : SQLiteOpenHelper(context, "app.db", null, 7) {
     fun mediaCheck(postRowId: Long, mediaIndex: Int): MediaCheck? =
         readableDatabase.rawQuery(
             "SELECT id, file_path, deleted FROM media WHERE post_row_id=? AND media_index=?",
-            arrayOf(postRowId.toString(), mediaIndex.toString())).use {
+            arrayOf<String>(postRowId.toString(), mediaIndex.toString())).use {
             if (it.moveToFirst())
                 MediaCheck(it.getLong(0), it.getString(1) ?: "", it.getInt(2) == 1)
             else null
@@ -435,7 +435,7 @@ class Db(context: Context) : SQLiteOpenHelper(context, "app.db", null, 7) {
     /** 按文件绝对路径判重（外部目录同步用）。 */
     fun mediaPathRegistered(path: String): Boolean =
         readableDatabase.rawQuery(
-            "SELECT 1 FROM media WHERE source_url=? LIMIT 1", arrayOf(path)).use { it.moveToFirst() }
+            "SELECT 1 FROM media WHERE source_url=? LIMIT 1", arrayOf<String>(path)).use { it.moveToFirst() }
 
     // ---------- 存量数据巡检回填（2026-09-10：轻量用户"逛到才下"，UID/hash 不能等自然下载激活） ----------
 
@@ -455,7 +455,7 @@ class Db(context: Context) : SQLiteOpenHelper(context, "app.db", null, 7) {
     fun updateAuthorUid(id: Long, uid: String): Boolean {
         val cv = ContentValues().apply { put("platform_uid", uid) }
         return writableDatabase.update("authors", cv, "id=? AND platform_uid=''",
-            arrayOf(id.toString())) > 0
+            arrayOf<String>(id.toString())) > 0
     }
 
     /** 回填作者资料：UID 必写；name/avatar 非空才覆盖（fxtwitter 为实时权威值，共享导入作者补头像与最新显示名）。 */
@@ -465,7 +465,7 @@ class Db(context: Context) : SQLiteOpenHelper(context, "app.db", null, 7) {
                name = CASE WHEN ?!='' THEN ? ELSE name END,
                avatar_url = CASE WHEN ?!='' THEN ? ELSE avatar_url END
                WHERE id=?""",
-            arrayOf(uid, name, name, avatar, avatar, id))
+            arrayOf<Any?>(uid, name, name, avatar, avatar, id))
     }
 
     /** 头像变体升级（零网络，幂等）：X CDN 的 _normal 是 48px 小图，统一换成 _400x400 高清变体。 */
@@ -493,17 +493,17 @@ class Db(context: Context) : SQLiteOpenHelper(context, "app.db", null, 7) {
     fun postById(rowId: Long): Triple<String, String, String>? =
         readableDatabase.rawQuery(
             "SELECT created_at, post_id, platform FROM posts WHERE id=?",
-            arrayOf(rowId.toString())).use {
+            arrayOf<String>(rowId.toString())).use {
             if (it.moveToFirst()) Triple(it.getString(0) ?: "", it.getString(1) ?: "", it.getString(2) ?: "")
             else null
         }
 
     fun updateMediaDownloadedAt(id: Long, iso: String) {
-        writableDatabase.execSQL("UPDATE media SET downloaded_at=? WHERE id=?", arrayOf(iso, id))
+        writableDatabase.execSQL("UPDATE media SET downloaded_at=? WHERE id=?", arrayOf<Any?>(iso, id))
     }
 
     fun updatePostCreatedAt(id: Long, iso: String) {
-        writableDatabase.execSQL("UPDATE posts SET created_at=? WHERE id=?", arrayOf(iso, id))
+        writableDatabase.execSQL("UPDATE posts SET created_at=? WHERE id=?", arrayOf<Any?>(iso, id))
     }
 
     /** X 帖子且 created_at 空缺的行：(id, post_id)。发帖时间可凭推文 ID 雪花解码零网络回填。 */
@@ -540,7 +540,7 @@ class Db(context: Context) : SQLiteOpenHelper(context, "app.db", null, 7) {
         if (hash.isBlank()) return
         writableDatabase.execSQL(
             "UPDATE media SET content_hash=? WHERE id=? AND content_hash=''",
-            arrayOf(hash, id))
+            arrayOf<Any?>(hash, id))
     }
 
     private val mediaCols = "m.id, m.post_row_id, m.media_index, m.media_type, m.file_path, m.thumb_path, m.ext, m.file_size, m.width, m.height, m.source_url, p.platform, p.post_id, p.post_url, p.created_at, p.text, a.handle, a.name, a.avatar_url, a.profile_url, m.deleted_at, m.origin, m.downloaded_at"
@@ -677,7 +677,7 @@ class Db(context: Context) : SQLiteOpenHelper(context, "app.db", null, 7) {
                 "source_url = CASE WHEN source_url LIKE ? || '%' " +
                 "THEN ? || substr(source_url, ?) ELSE source_url END " +
                 "WHERE file_path LIKE ? || '%'",
-            arrayOf(srcPrefix, cut.toString(), mirrorPrefix, srcPrefix, cut.toString(), mirrorPrefix))
+            arrayOf<Any?>(srcPrefix, cut.toString(), mirrorPrefix, srcPrefix, cut.toString(), mirrorPrefix))
         return n
     }
 
@@ -692,12 +692,12 @@ class Db(context: Context) : SQLiteOpenHelper(context, "app.db", null, 7) {
     fun getMedia(id: Long): MediaItem? =
         readableDatabase.rawQuery(
             "SELECT $mediaCols FROM media m JOIN posts p ON p.id=m.post_row_id JOIN authors a ON a.id=p.author_id WHERE m.id=?",
-            arrayOf(id.toString())).use { if (it.moveToFirst()) mediaRow(it) else null }
+            arrayOf<String>(id.toString())).use { if (it.moveToFirst()) mediaRow(it) else null }
 
     /** 软删除：移入回收站（保留文件，记录删除时间）。 */
     fun deleteMedia(id: Long): Boolean {
         writableDatabase.execSQL(
-            "UPDATE media SET deleted=1, deleted_at=? WHERE id=?", arrayOf(nowIso(), id))
+            "UPDATE media SET deleted=1, deleted_at=? WHERE id=?", arrayOf<Any?>(nowIso(), id))
         return true
     }
 
@@ -706,11 +706,11 @@ class Db(context: Context) : SQLiteOpenHelper(context, "app.db", null, 7) {
         if (ids.isEmpty()) return
         writableDatabase.execSQL(
             "UPDATE media SET deleted=1, deleted_at=? WHERE id IN (${ids.joinToString(",")})",
-            arrayOf(nowIso()))
+            arrayOf<Any?>(nowIso()))
     }
 
     fun restoreMedia(id: Long) {
-        writableDatabase.execSQL("UPDATE media SET deleted=0, deleted_at='' WHERE id=?", arrayOf(id))
+        writableDatabase.execSQL("UPDATE media SET deleted=0, deleted_at='' WHERE id=?", arrayOf<Any?>(id))
     }
 
     fun restoreAll() {
@@ -740,7 +740,7 @@ class Db(context: Context) : SQLiteOpenHelper(context, "app.db", null, 7) {
     fun diskPathRegistered(path: String): Boolean =
         readableDatabase.rawQuery(
             "SELECT 1 FROM media WHERE file_path=? OR thumb_path=? LIMIT 1",
-            arrayOf(path, path)).use { it.moveToFirst() }
+            arrayOf<String>(path, path)).use { it.moveToFirst() }
 
     /** SQL LIKE 通配转义（路径含 % _ \ 时不误匹配）。 */
     private fun likeEscape(s: String): String =
@@ -761,6 +761,25 @@ class Db(context: Context) : SQLiteOpenHelper(context, "app.db", null, 7) {
         return readableDatabase.rawQuery(sel.toString(), args.toTypedArray()).use { cur ->
             val out = mutableListOf<Pair<Long, String>>()
             while (cur.moveToNext()) out.add(cur.getLong(0) to (cur.getString(1) ?: ""))
+            out
+        }
+    }
+
+    /**
+     * 陈旧登记清扫（2026-10-25）：同 externalDirMedia 口径，但带出 file_path，
+     * 供同步时判定「登记过的文件已从目录消失」→ 硬删登记行 + 清缩略图。含回收站条目。
+     */
+    fun externalDirRows(prefix: String, excludeBase: String): List<Triple<Long, String, String>> {
+        val sel = StringBuilder("SELECT id, file_path, thumb_path FROM media WHERE file_path LIKE ? ESCAPE '\\'")
+        val args = mutableListOf<String>(likeEscape(prefix) + "/%")
+        if (excludeBase.isNotBlank()) {
+            sel.append(" AND file_path NOT LIKE ? ESCAPE '\\'")
+            args.add(likeEscape(excludeBase) + "/%")
+        }
+        return readableDatabase.rawQuery(sel.toString(), args.toTypedArray()).use { cur ->
+            val out = mutableListOf<Triple<Long, String, String>>()
+            while (cur.moveToNext())
+                out.add(Triple(cur.getLong(0), cur.getString(1) ?: "", cur.getString(2) ?: ""))
             out
         }
     }
@@ -829,8 +848,8 @@ class Db(context: Context) : SQLiteOpenHelper(context, "app.db", null, 7) {
         writableDatabase.execSQL(
             """INSERT INTO inbox(url, platform, kind, captured_at) VALUES(?,?,?,?)
             ON CONFLICT(url) DO UPDATE SET captured_at=excluded.captured_at""",
-            arrayOf(url, platform, kind, nowIso()))
-        return readableDatabase.rawQuery("SELECT id FROM inbox WHERE url=?", arrayOf(url)).use {
+            arrayOf<Any?>(url, platform, kind, nowIso()))
+        return readableDatabase.rawQuery("SELECT id FROM inbox WHERE url=?", arrayOf<String>(url)).use {
             it.moveToFirst(); it.getLong(0)
         }
     }
@@ -840,34 +859,34 @@ class Db(context: Context) : SQLiteOpenHelper(context, "app.db", null, 7) {
         writableDatabase.execSQL(
             """UPDATE inbox SET platform=?, kind=?, handle=?, name=?, avatar_url=?, text=?, media_count=?,
             preview_url=CASE WHEN ?!='' THEN ? ELSE preview_url END WHERE id=?""",
-            arrayOf(platform, kind, handle, name, avatar, text, mediaCount, preview, preview, id))
+            arrayOf<Any?>(platform, kind, handle, name, avatar, text, mediaCount, preview, preview, id))
     }
 
     fun updateInboxStatus(id: Long, status: String, error: String = "", taskId: Long = 0) {
         writableDatabase.execSQL(
             "UPDATE inbox SET status=?, error=?, task_id=? WHERE id=?",
-            arrayOf(status, error, taskId, id))
+            arrayOf<Any?>(status, error, taskId, id))
     }
 
     fun inboxByTask(taskId: Long): InboxItem? =
-        readableDatabase.rawQuery("SELECT * FROM inbox WHERE task_id=?", arrayOf(taskId.toString())).use {
+        readableDatabase.rawQuery("SELECT * FROM inbox WHERE task_id=?", arrayOf<String>(taskId.toString())).use {
             if (it.moveToFirst()) inboxRow(it) else null
         }
 
     fun inboxItem(id: Long): InboxItem? =
-        readableDatabase.rawQuery("SELECT * FROM inbox WHERE id=?", arrayOf(id.toString())).use {
+        readableDatabase.rawQuery("SELECT * FROM inbox WHERE id=?", arrayOf<String>(id.toString())).use {
             if (it.moveToFirst()) inboxRow(it) else null
         }
 
     /** 收件箱 URL 是否已存在（capture 查重；不受 listInbox LIMIT 300 影响）。 */
     fun inboxUrlExists(url: String): Boolean =
-        readableDatabase.rawQuery("SELECT 1 FROM inbox WHERE url=? LIMIT 1", arrayOf(url)).use { it.moveToFirst() }
+        readableDatabase.rawQuery("SELECT 1 FROM inbox WHERE url=? LIMIT 1", arrayOf<String>(url)).use { it.moveToFirst() }
 
     fun listInbox(status: String = ""): List<InboxItem> {
         val sql = if (status.isBlank())
             "SELECT * FROM inbox ORDER BY id DESC LIMIT 300"
         else "SELECT * FROM inbox WHERE status=? ORDER BY id DESC LIMIT 300"
-        return readableDatabase.rawQuery(sql, if (status.isBlank()) null else arrayOf(status)).use { cur ->
+        return readableDatabase.rawQuery(sql, if (status.isBlank()) null else arrayOf<String>(status)).use { cur ->
             val out = mutableListOf<InboxItem>()
             while (cur.moveToNext()) out.add(inboxRow(cur))
             out
@@ -875,7 +894,7 @@ class Db(context: Context) : SQLiteOpenHelper(context, "app.db", null, 7) {
     }
 
     fun removeInbox(id: Long) {
-        writableDatabase.execSQL("DELETE FROM inbox WHERE id=?", arrayOf(id))
+        writableDatabase.execSQL("DELETE FROM inbox WHERE id=?", arrayOf<Any?>(id))
     }
 
     private fun inboxRow(c: android.database.Cursor): InboxItem {
@@ -904,11 +923,11 @@ class Db(context: Context) : SQLiteOpenHelper(context, "app.db", null, 7) {
     fun incTaskBytes(id: Long, delta: Long) {
         if (delta <= 0L) return
         writableDatabase.execSQL(
-            "UPDATE tasks SET bytes = bytes + ? WHERE id=?", arrayOf(delta.toString(), id.toString()))
+            "UPDATE tasks SET bytes = bytes + ? WHERE id=?", arrayOf<Any?>(delta.toString(), id.toString()))
     }
 
     fun getTask(id: Long): TaskItem? =
-        readableDatabase.rawQuery("SELECT * FROM tasks WHERE id=?", arrayOf(id.toString())).use {
+        readableDatabase.rawQuery("SELECT * FROM tasks WHERE id=?", arrayOf<String>(id.toString())).use {
             if (it.moveToFirst()) taskRow(it) else null
         }
 
@@ -920,13 +939,13 @@ class Db(context: Context) : SQLiteOpenHelper(context, "app.db", null, 7) {
 
     fun listTasks(limit: Int = 80): List<TaskItem> =
         readableDatabase.rawQuery(
-            "SELECT * FROM tasks ORDER BY id DESC LIMIT ?", arrayOf(limit.toString())).use { cur ->
+            "SELECT * FROM tasks ORDER BY id DESC LIMIT ?", arrayOf<String>(limit.toString())).use { cur ->
             val out = mutableListOf<TaskItem>()
             while (cur.moveToNext()) out.add(taskRow(cur))
             out
         }
 
-    fun deleteTask(id: Long) = writableDatabase.execSQL("DELETE FROM tasks WHERE id=?", arrayOf(id))
+    fun deleteTask(id: Long) = writableDatabase.execSQL("DELETE FROM tasks WHERE id=?", arrayOf<Any?>(id))
 
     fun runningTaskIds(): List<Long> =
         readableDatabase.rawQuery(
@@ -942,16 +961,16 @@ class Db(context: Context) : SQLiteOpenHelper(context, "app.db", null, 7) {
         writableDatabase.execSQL(
             """INSERT INTO proxy_candidates(type, host, port, source) VALUES(?,?,?,?)
             ON CONFLICT(type, host, port) DO UPDATE SET source=excluded.source""",
-            arrayOf(type, host, port, source))
+            arrayOf<Any?>(type, host, port, source))
         return readableDatabase.rawQuery(
             "SELECT id FROM proxy_candidates WHERE type=? AND host=? AND port=?",
-            arrayOf(type, host, port.toString())).use { it.moveToFirst(); it.getLong(0) }
+            arrayOf<String>(type, host, port.toString())).use { it.moveToFirst(); it.getLong(0) }
     }
 
     fun updateCandidate(id: Long, latencyMs: Double?, speedMbps: Double?, score: Double, alive: Boolean) {
         writableDatabase.execSQL(
             "UPDATE proxy_candidates SET latency_ms=?, speed_mbps=?, score=?, alive=?, last_tested=? WHERE id=?",
-            arrayOf(latencyMs, speedMbps, score, if (alive) 1 else 0, nowIso(), id))
+            arrayOf<Any?>(latencyMs, speedMbps, score, if (alive) 1 else 0, nowIso(), id))
     }
 
     fun clearCandidates() = writableDatabase.execSQL("DELETE FROM proxy_candidates")
@@ -973,14 +992,14 @@ class Db(context: Context) : SQLiteOpenHelper(context, "app.db", null, 7) {
 
     fun addProxyLog(event: String, detail: String) {
         writableDatabase.execSQL("INSERT INTO proxy_log(ts, event, detail) VALUES(?,?,?)",
-            arrayOf(nowIso(), event, detail))
+            arrayOf<Any?>(nowIso(), event, detail))
         writableDatabase.execSQL(
             "DELETE FROM proxy_log WHERE id NOT IN (SELECT id FROM proxy_log ORDER BY id DESC LIMIT 200)")
     }
 
     fun proxyLogs(limit: Int = 60): List<ProxyLogItem> =
         readableDatabase.rawQuery(
-            "SELECT * FROM proxy_log ORDER BY id DESC LIMIT ?", arrayOf(limit.toString())).use { cur ->
+            "SELECT * FROM proxy_log ORDER BY id DESC LIMIT ?", arrayOf<String>(limit.toString())).use { cur ->
             val out = mutableListOf<ProxyLogItem>()
             while (cur.moveToNext()) {
                 out.add(ProxyLogItem(cur.getLong(0), cur.getString(1) ?: "",

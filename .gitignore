@@ -44,6 +44,7 @@ __pycache__/
 
 # ===== WorkBuddy / 本机调试产物 =====
 .workbuddy/
+.workbuddy-ai/
 *.db
 *.db-shm
 *.db-wal

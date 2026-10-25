@@ -1,9 +1,14 @@
 [versions]
 agp = "8.9.1"
-kotlin = "2.0.21"
+# M11（2026-10-25）：液态玻璃真折射框架 Kyant0/backdrop。
+# 版本约束链（实测）：backdrop 2.0.1 → compose 1.12 → AGP 9.1（Chaquopy 16.1 封顶 AGP 8.x，不可用）；
+# backdrop 1.0.0 → compose 1.9.4 + kotlin-stdlib 2.2 → AGP 8.9.1 可用。
+# 故 BOM 取 2025.11.01（ui 1.9.5 ≥ 1.9.4），Kotlin 对齐 Edqiu 2.4.10。
+kotlin = "2.4.10"
 coreKtx = "1.17.0"
-activityCompose = "1.9.3"
-composeBom = "2024.12.01"
+activityCompose = "1.11.0"
+composeBom = "2025.11.01"
+backdrop = "1.0.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -12,6 +17,7 @@ androidx-compose-bom = { group = "androidx.compose", name = "compose-bom", versi
 androidx-compose-ui = { group = "androidx.compose.ui", name = "ui" }
 androidx-compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview" }
 androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3" }
+kyant-backdrop = { group = "io.github.kyant0", name = "backdrop", version.ref = "backdrop" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
